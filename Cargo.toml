@@ -25,3 +25,7 @@ git = "https://github.com/TjeuKayim/rusqlite.git"
 # FIXME: Wait for pull-request to be merged
 rev="bc558d248f80a57f4b7b26ef5248fa5b3a03ab15"
 features = ["bundled", "deserialize", "wasm32-wasi-vfs"]
+
+#[dependencies.rusqlite]
+#path = "../rusqlite/"
+#features = ["bundled", "deserialize"]

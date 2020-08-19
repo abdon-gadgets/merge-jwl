@@ -1,3 +1,6 @@
+mod database;
+
+use crate::database::Database;
 use anyhow::{anyhow, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{event, Level};
@@ -48,10 +51,6 @@ struct UserDataBackup {
     schema_version: i32,
 }
 
-struct Database {
-    // mem_file: Vec<u8>,
-}
-
 const MANIFEST_ENTRY_NAME: &str = "manifest.json";
 const DATABASE_ENTRY_NAME: &str = "userData.db";
 
@@ -73,6 +72,7 @@ fn load(file: impl io::Read + io::Seek) -> Result<BackupFile> {
     let mut mem_file = Vec::with_capacity(database_entry.size() as _);
     io::copy(&mut database_entry, &mut mem_file).context("Read database to memory")?;
 
-    let database = Database {};
+    let database = Database::read(mem_file)?;
+    dbg!(&database);
     Ok(BackupFile { manifest, database })
 }

@@ -7,3 +7,21 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+zip = { version = "0.5.6", default-features = false, features = ["deflate"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.2", features = ["json"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.rusqlite]
+git = "https://github.com/TjeuKayim/rusqlite.git"
+# FIXME: Wait for pull-request to be merged
+rev="bc558d248f80a57f4b7b26ef5248fa5b3a03ab15"
+features = ["bundled", "deserialize"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.rusqlite]
+git = "https://github.com/TjeuKayim/rusqlite.git"
+# FIXME: Wait for pull-request to be merged
+rev="bc558d248f80a57f4b7b26ef5248fa5b3a03ab15"
+features = ["bundled", "deserialize", "wasm32-wasi-vfs"]

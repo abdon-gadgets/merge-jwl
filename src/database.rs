@@ -2,111 +2,155 @@ use anyhow::{anyhow, ensure, Context, Result};
 use rusqlite::{params, Connection, DatabaseName, NO_PARAMS};
 use tracing::{event, Level};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Database {
-    last_modified: String,
-    locations: Vec<Location>,
-    notes: Vec<Note>,
-    input_fields: Vec<InputField>,
-    tags: Vec<Tag>,
-    tag_maps: Vec<TagMap>,
-    block_ranges: Vec<BlockRange>,
-    bookmarks: Vec<Bookmark>,
-    user_marks: Vec<UserMark>,
+    pub last_modified: String,
+    pub locations: Vec<Location>,
+    pub notes: Vec<Note>,
+    pub input_fields: Vec<InputField>,
+    pub tags: Vec<Tag>,
+    pub tag_maps: Vec<TagMap>,
+    pub block_ranges: Vec<BlockRange>,
+    pub bookmarks: Vec<Bookmark>,
+    pub user_marks: Vec<UserMark>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Location {
-    location_id: u32,
-    book_number: Option<u32>,
-    chapter_number: Option<u32>,
-    document_id: Option<u32>,
-    track: Option<u32>,
-    issue_tag_number: u32,
-    key_symbol: Option<String>,
-    meps_language: u32,
-    r#type: u32,
-    title: Option<String>,
+    pub location_id: u32,
+    pub book_number: Option<u32>,
+    pub chapter_number: Option<u32>,
+    pub document_id: Option<u32>,
+    pub track: Option<u32>,
+    pub issue_tag_number: u32,
+    pub key_symbol: Option<String>,
+    pub meps_language: u32,
+    pub r#type: u32,
+    pub title: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Note {
-    note_id: u32,
-    guid: String,
-    user_mark_id: Option<u32>,
-    location_id: Option<u32>,
-    title: Option<String>,
-    content: Option<String>,
-    last_modified: String,
-    block_type: u32,
-    block_identifier: Option<u32>,
+    pub note_id: u32,
+    pub guid: String,
+    pub user_mark_id: Option<u32>,
+    pub location_id: Option<u32>,
+    pub title: Option<String>,
+    pub content: Option<String>,
+    pub last_modified: String,
+    pub block_type: u32,
+    pub block_identifier: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InputField {
-    location_id: u32,
-    text_tag: String,
-    value: String,
+    pub location_id: u32,
+    pub text_tag: String,
+    pub value: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tag {
-    tag_id: u32,
-    r#type: u32,
-    name: String,
-    image_filename: Option<String>,
+    pub tag_id: u32,
+    pub r#type: u32,
+    pub name: String,
+    pub image_filename: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TagMap {
-    tag_read_id: u32,
-    playlist_item_id: Option<u32>,
-    location_id: Option<u32>,
-    note_id: Option<u32>,
-    tag_id: u32,
-    position: u32,
+    pub tag_read_id: u32,
+    pub playlist_item_id: Option<u32>,
+    pub location_id: Option<u32>,
+    pub note_id: Option<u32>,
+    pub tag_id: u32,
+    pub position: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockRange {
-    block_range_id: u32,
-    block_type: u32,
-    identifier: u32,
-    start_token: Option<u32>,
-    end_token: Option<u32>,
-    user_mark_id: u32,
+    pub block_range_id: u32,
+    pub block_type: u32,
+    pub identifier: u32,
+    pub start_token: Option<u32>,
+    pub end_token: Option<u32>,
+    pub user_mark_id: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Bookmark {
-    bookmark_id: u32,
-    location_id: u32,
-    publication_location_id: u32,
-    slot: u32,
-    title: String,
-    snippet: Option<String>,
-    block_type: u32,
-    block_identifier: Option<u32>,
+    pub bookmark_id: u32,
+    pub location_id: u32,
+    pub publication_location_id: u32,
+    pub slot: u32,
+    pub title: String,
+    pub snippet: Option<String>,
+    pub block_type: u32,
+    pub block_identifier: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UserMark {
-    user_mark_id: u32,
-    color_index: u32,
-    location_id: u32,
-    style_index: u32,
-    user_mark_guid: String,
-    version: u32,
+    pub user_mark_id: u32,
+    pub color_index: u32,
+    pub location_id: u32,
+    pub style_index: u32,
+    pub user_mark_guid: String,
+    pub version: u32,
 }
 
 impl Database {
-    pub fn read(mem_file: Vec<u8>) -> Result<Self> {
+    pub fn read(mut mem_file: Vec<u8>) -> Result<Self> {
         ensure!(mem_file.starts_with(b"SQLite format 3\0"), "Invalid header");
+        dbg!(mem_file[18]);
+        dbg!(mem_file[19]);
+        mem_file[18] = 1;
+        mem_file[19] = 1;
         let conn = Connection::open_in_memory().context("open_in_memory")?;
-        conn.query_row("PRAGMA locking_mode=EXCLUSIVE", NO_PARAMS, |_| Ok(()))
-            .context("locking_mode EXCLUSIVE")?;
+        // let locking_mode: String =
+        //     conn.query_row("PRAGMA locking_mode=EXCLUSIVE", NO_PARAMS, |r| r.get(0))?;
+        // ensure!(
+        //     &locking_mode == "exclusive",
+        //     "Could not change locking_mode {}",
+        //     &locking_mode
+        // );
+        // conn.query_row("PRAGMA wal_autocheckpoint=0", NO_PARAMS, |_| Ok(()))?;
+        // let locking_mode: String =
+        //     conn.query_row("PRAGMA synchronous=OFF", NO_PARAMS, |r| r.get(0))?;
+        // ensure!(&locking_mode == "off", "synchronous {}", &locking_mode);
+
+        // conn.execute_batch("ATTACH ':memory:' AS w");
+        // let journal_mode: String =
+        //     conn.query_row("PRAGMA journal_mode=OFF", NO_PARAMS, |r| r.get(0))?;
+        // ensure!(
+        //     &journal_mode == "off",
+        //     "Could not change journal_mode {}",
+        //     &journal_mode
+        // );
+        // conn.deserialize_read_only(DatabaseName::Main, &mem_file)
         conn.deserialize(DatabaseName::Main, mem_file)
             .context("Deserialize")?;
+
+        // panic!("hi8");
+
+        // let journal_mode: String =
+        //     conn.query_row("PRAGMA journal_mode", NO_PARAMS, |r| r.get(0))?;
+        // ensure!(&journal_mode == "wal", "journal_mode {}", &journal_mode);
+        // conn.execute_batch("VACUUM")?;
+        // let wal_checkpoint: i32 =
+        //     conn.query_row("PRAGMA schema.wal_checkpoint", NO_PARAMS, |r| r.get(0))?;
+        // ensure!(
+        //     wal_checkpoint == 0,
+        //     "wal_checkpoint failed {}",
+        //     wal_checkpoint
+        // );
+        // let journal_mode: String =
+        //     conn.query_row("PRAGMA journal_mode=OFF", NO_PARAMS, |r| r.get(0))?;
+        // ensure!(
+        //     &journal_mode == "off",
+        //     "Could not change journal_mode {}",
+        //     &journal_mode
+        // );
 
         Ok(Database {
             last_modified: read_last_modified(&conn)?,

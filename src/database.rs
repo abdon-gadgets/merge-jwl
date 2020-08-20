@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use rusqlite::{params, Connection, DatabaseName, NO_PARAMS};
 use tracing::{event, Level};
 
@@ -102,55 +102,19 @@ pub struct UserMark {
 impl Database {
     pub fn read(mut mem_file: Vec<u8>) -> Result<Self> {
         ensure!(mem_file.starts_with(b"SQLite format 3\0"), "Invalid header");
-        dbg!(mem_file[18]);
-        dbg!(mem_file[19]);
-        mem_file[18] = 1;
-        mem_file[19] = 1;
+        // Set file format read/write version numbers to 1 for journal mode rollback
+        let file_format_version = &mut mem_file[18..20];
+        match file_format_version {
+            [1, 1] => (),
+            [2, 2] => file_format_version.copy_from_slice(&[1, 1]),
+            _ => bail!("Unknown file format read/write version"),
+        }
         let conn = Connection::open_in_memory().context("open_in_memory")?;
-        // let locking_mode: String =
-        //     conn.query_row("PRAGMA locking_mode=EXCLUSIVE", NO_PARAMS, |r| r.get(0))?;
-        // ensure!(
-        //     &locking_mode == "exclusive",
-        //     "Could not change locking_mode {}",
-        //     &locking_mode
-        // );
-        // conn.query_row("PRAGMA wal_autocheckpoint=0", NO_PARAMS, |_| Ok(()))?;
-        // let locking_mode: String =
-        //     conn.query_row("PRAGMA synchronous=OFF", NO_PARAMS, |r| r.get(0))?;
-        // ensure!(&locking_mode == "off", "synchronous {}", &locking_mode);
-
-        // conn.execute_batch("ATTACH ':memory:' AS w");
-        // let journal_mode: String =
-        //     conn.query_row("PRAGMA journal_mode=OFF", NO_PARAMS, |r| r.get(0))?;
-        // ensure!(
-        //     &journal_mode == "off",
-        //     "Could not change journal_mode {}",
-        //     &journal_mode
-        // );
-        // conn.deserialize_read_only(DatabaseName::Main, &mem_file)
         conn.deserialize(DatabaseName::Main, mem_file)
             .context("Deserialize")?;
-
-        // panic!("hi8");
-
-        // let journal_mode: String =
-        //     conn.query_row("PRAGMA journal_mode", NO_PARAMS, |r| r.get(0))?;
-        // ensure!(&journal_mode == "wal", "journal_mode {}", &journal_mode);
-        // conn.execute_batch("VACUUM")?;
-        // let wal_checkpoint: i32 =
-        //     conn.query_row("PRAGMA schema.wal_checkpoint", NO_PARAMS, |r| r.get(0))?;
-        // ensure!(
-        //     wal_checkpoint == 0,
-        //     "wal_checkpoint failed {}",
-        //     wal_checkpoint
-        // );
-        // let journal_mode: String =
-        //     conn.query_row("PRAGMA journal_mode=OFF", NO_PARAMS, |r| r.get(0))?;
-        // ensure!(
-        //     &journal_mode == "off",
-        //     "Could not change journal_mode {}",
-        //     &journal_mode
-        // );
+        let journal_mode: String =
+            conn.query_row("PRAGMA journal_mode", NO_PARAMS, |r| r.get(0))?;
+        ensure!(&journal_mode == "memory", "journal_mode {}", &journal_mode);
 
         Ok(Database {
             last_modified: read_last_modified(&conn)?,

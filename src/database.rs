@@ -4,9 +4,10 @@ use tracing::{event, Level};
 
 #[derive(Debug)]
 pub struct Database {
-    time_last_modified: String,
+    last_modified: String,
     locations: Vec<Location>,
     notes: Vec<Note>,
+    input_fields: Vec<InputField>,
     tags: Vec<Tag>,
     tag_maps: Vec<TagMap>,
     block_ranges: Vec<BlockRange>,
@@ -39,6 +40,13 @@ pub struct Note {
     last_modified: String,
     block_type: u32,
     block_identifier: Option<u32>,
+}
+
+#[derive(Debug)]
+pub struct InputField {
+    location_id: u32,
+    text_tag: String,
+    value: String,
 }
 
 #[derive(Debug)]
@@ -101,9 +109,10 @@ impl Database {
             .context("Deserialize")?;
 
         Ok(Database {
-            time_last_modified: read_last_modified(&conn)?,
+            last_modified: read_last_modified(&conn)?,
             locations: read_locations(&conn)?,
             notes: read_notes(&conn)?,
+            input_fields: read_input_fields(&conn)?,
             tags: read_tags(&conn)?,
             tag_maps: read_tag_maps(&conn)?,
             block_ranges: read_block_ranges(&conn)?,
@@ -151,6 +160,18 @@ fn read_notes(conn: &Connection) -> rusqlite::Result<Vec<Note>> {
             last_modified: r.get(6)?,
             block_type: r.get(7)?,
             block_identifier: r.get(8)?,
+        })
+    })?;
+    rows.collect()
+}
+
+fn read_input_fields(conn: &Connection) -> rusqlite::Result<Vec<InputField>> {
+    let mut stmt = conn.prepare("SELECT * FROM InputField")?;
+    let rows = stmt.query_map(NO_PARAMS, |r| {
+        Ok(InputField {
+            location_id: r.get(0)?,
+            text_tag: r.get(1)?,
+            value: r.get(2)?,
         })
     })?;
     rows.collect()

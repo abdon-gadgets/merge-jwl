@@ -1,19 +1,17 @@
-use crate::database::Database;
+use crate::{Database, Result};
 
-use anyhow::{anyhow, ensure, Context, Result};
-use rusqlite::{params, Connection, DatabaseName, NO_PARAMS};
 use tracing::{event, Level};
 
 use std::collections::HashSet;
 
-pub fn clean(database: &mut Database) -> Result<usize> {
+pub fn clean(database: &mut Database) -> usize {
     let mut c = Cleaner {
         database,
         rows_removed: 0,
     };
     c.clean_block_ranges();
     c.clean_locations();
-    Ok(c.rows_removed)
+    c.rows_removed
 }
 
 struct Cleaner<'a> {

@@ -4,6 +4,7 @@ use tracing::{event, Level};
 
 #[derive(Debug, Clone)]
 pub struct Database {
+    schema_sql: Vec<String>,
     pub last_modified: String,
     pub locations: Vec<Location>,
     pub notes: Vec<Note>,
@@ -99,6 +100,14 @@ pub struct UserMark {
     pub version: u32,
 }
 
+#[derive(Debug)]
+struct Violation {
+    table: String,
+    row_id: Option<i64>,
+    parent: String,
+    f_kid: i64,
+}
+
 impl Database {
     pub fn read(mut mem_file: Vec<u8>) -> Result<Self> {
         ensure!(mem_file.starts_with(b"SQLite format 3\0"), "Invalid header");
@@ -116,7 +125,23 @@ impl Database {
             conn.query_row("PRAGMA journal_mode", NO_PARAMS, |r| r.get(0))?;
         ensure!(&journal_mode == "memory", "journal_mode {}", &journal_mode);
 
+        // Replaces FixupAnomalies
+        let mut stmt = conn.prepare("SELECT * FROM pragma_foreign_key_check")?;
+        let violations = stmt.query_map(NO_PARAMS, |r| {
+            Ok(Violation {
+                table: r.get(0)?,
+                row_id: r.get(1)?,
+                parent: r.get(2)?,
+                f_kid: r.get(3)?,
+            })
+        })?;
+        let violations = violations.collect::<rusqlite::Result<Vec<_>>>()?;
+        if !violations.is_empty() {
+            bail!("Foreign key check failed: {:?}", violations);
+        }
+
         Ok(Database {
+            schema_sql: read_schema(&conn)?,
             last_modified: read_last_modified(&conn)?,
             locations: read_locations(&conn)?,
             notes: read_notes(&conn)?,
@@ -128,6 +153,22 @@ impl Database {
             user_marks: read_user_marks(&conn)?,
         })
     }
+
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        let mut mem_file = Vec::new(); // TODO: Guess size
+        let conn = Connection::open_in_memory()?.into_borrowing();
+        conn.deserialize_writable(DatabaseName::Main, &mut mem_file)?;
+        for sql in &self.schema_sql {
+            conn.execute_batch(sql);
+        }
+        Ok(mem_file)
+    }
+}
+
+fn read_schema(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL")?;
+    let rows = stmt.query_map(NO_PARAMS, |r| r.get::<_, String>(0))?;
+    rows.collect()
 }
 
 fn read_last_modified(conn: &Connection) -> rusqlite::Result<String> {

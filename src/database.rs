@@ -1,9 +1,10 @@
 use anyhow::{bail, ensure, Context, Result};
-use rusqlite::{Connection, DatabaseName, NO_PARAMS};
+use rusqlite::{params, Connection, DatabaseName, NO_PARAMS};
+use tracing::{event, Level};
 
 #[derive(Debug, Clone)]
 pub struct Database {
-    schema_sql: Vec<String>,
+    schema_sql: Vec<String>, // TODO: Optimize to do this only once
     pub last_modified: String,
     pub locations: Vec<Location>,
     pub notes: Vec<Note>,
@@ -125,19 +126,7 @@ impl Database {
         ensure!(&journal_mode == "memory", "journal_mode {}", &journal_mode);
 
         // Replaces FixupAnomalies
-        let mut stmt = conn.prepare("SELECT * FROM pragma_foreign_key_check")?;
-        let violations = stmt.query_map(NO_PARAMS, |r| {
-            Ok(Violation {
-                table: r.get(0)?,
-                row_id: r.get(1)?,
-                parent: r.get(2)?,
-                f_kid: r.get(3)?,
-            })
-        })?;
-        let violations = violations.collect::<rusqlite::Result<Vec<_>>>()?;
-        if !violations.is_empty() {
-            bail!("Foreign key check failed: {:?}", violations);
-        }
+        foreign_key_check(&conn)?;
 
         Ok(Database {
             schema_sql: read_schema(&conn)?,
@@ -157,11 +146,42 @@ impl Database {
         let mut mem_file = Vec::new(); // TODO: Guess size
         let conn = Connection::open_in_memory()?.into_borrowing();
         conn.deserialize_writable(DatabaseName::Main, &mut mem_file)?;
+        // conn.execute_batch("PRAGMA foreign_keys=0")?;
         for sql in &self.schema_sql {
             conn.execute_batch(sql)?;
         }
+        let s = Export {
+            conn: &conn,
+            database: self,
+        };
+        s.locations()?;
+        s.notes()?;
+        s.user_marks()?;
+        s.tags()?;
+        s.tag_maps()?;
+        s.block_ranges()?;
+        s.bookmarks()?;
+        s.input_fields()?;
+        // foreign_key_check(&conn)?;
         Ok(mem_file)
     }
+}
+
+fn foreign_key_check(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("SELECT * FROM pragma_foreign_key_check")?;
+    let violations = stmt.query_map(NO_PARAMS, |r| {
+        Ok(Violation {
+            table: r.get(0)?,
+            row_id: r.get(1)?,
+            parent: r.get(2)?,
+            f_kid: r.get(3)?,
+        })
+    })?;
+    let violations = violations.collect::<rusqlite::Result<Vec<_>>>()?;
+    if !violations.is_empty() {
+        bail!("Foreign key check failed: {:?}", violations);
+    }
+    Ok(())
 }
 
 fn read_schema(conn: &Connection) -> rusqlite::Result<Vec<String>> {
@@ -299,4 +319,75 @@ fn read_user_marks(conn: &Connection) -> rusqlite::Result<Vec<UserMark>> {
         })
     })?;
     rows.collect()
+}
+
+struct Export<'a> {
+    conn: &'a Connection,
+    database: &'a Database,
+}
+
+impl Export<'_> {
+    fn locations(&self) -> rusqlite::Result<()> {
+        event!(Level::DEBUG, "write locations");
+        let mut stmt = self
+            .conn
+            .prepare("INSERT INTO Location VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
+        for l in &self.database.locations {
+            stmt.execute(params![
+                l.location_id,
+                l.book_number,
+                l.chapter_number,
+                l.document_id,
+                l.track,
+                l.issue_tag_number,
+                l.key_symbol,
+                l.meps_language,
+                l.r#type,
+                l.title,
+            ])?;
+        }
+        Ok(())
+    }
+
+    fn notes(&self) -> rusqlite::Result<()> {
+        Ok(())
+    }
+
+    fn user_marks(&self) -> rusqlite::Result<()> {
+        event!(Level::DEBUG, "write user_marks");
+        let mut stmt = self
+            .conn
+            .prepare("INSERT INTO UserMark VALUES (?, ?, ?, ?, ?, ?)")?;
+        for u in &self.database.user_marks {
+            stmt.execute(params![
+                u.user_mark_id,
+                u.color_index,
+                u.location_id,
+                u.style_index,
+                u.user_mark_guid,
+                u.version,
+            ])?;
+        }
+        Ok(())
+    }
+
+    fn tags(&self) -> rusqlite::Result<()> {
+        Ok(())
+    }
+
+    fn tag_maps(&self) -> rusqlite::Result<()> {
+        Ok(())
+    }
+
+    fn block_ranges(&self) -> rusqlite::Result<()> {
+        Ok(())
+    }
+
+    fn bookmarks(&self) -> rusqlite::Result<()> {
+        Ok(())
+    }
+
+    fn input_fields(&self) -> rusqlite::Result<()> {
+        Ok(())
+    }
 }

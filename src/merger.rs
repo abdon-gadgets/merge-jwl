@@ -1,30 +1,37 @@
 use crate::database::Location;
 use crate::{anyhow, bail, Database, Result};
 use std::collections::HashMap;
+use tracing::{event, Level};
 
 pub fn merge_databases(mut originals: impl Iterator<Item = Database>) -> Result<Database> {
     let mut result = originals.next().ok_or_else(|| anyhow!("At least 1 db"))?;
     for database in originals {
+        event!(Level::DEBUG, "Merge databases");
         merge(&database, &mut result)?;
     }
-    // TODO: PRAGMA foreign_keys=ON
     Ok(result)
 }
 
 fn merge(src: &Database, dst: &mut Database) -> Result<()> {
     let mut s = State {
-        src,
-        dst,
         user_mark_translate: HashMap::new(),
         location_translate: HashMap::new(),
         // TODO: Lazy initialization of indices
-        location_value_index: src
+        src_location_index: src.locations.iter().map(|l| (l.location_id, l)).collect(),
+        dst_location_value_index: dst
             .locations
             .iter()
             .map(|l| (l.into(), l.location_id))
             .collect(),
-        location_index: src.locations.iter().map(|l| (l.location_id, l)).collect(),
-        location_max_id: src.locations.last().map_or(0, |l| l.location_id),
+        // TODO: Optimize first/last
+        location_max_id: dst
+            .locations
+            .iter()
+            .map(|l| l.location_id)
+            .max()
+            .unwrap_or(0),
+        src,
+        dst,
     };
     s.merge_user_marks()?;
     Ok(())
@@ -35,8 +42,8 @@ struct State<'a> {
     dst: &'a mut Database,
     user_mark_translate: HashMap<u32, u32>,
     location_translate: HashMap<u32, u32>,
-    location_value_index: HashMap<LocationValue, u32>,
-    location_index: HashMap<u32, &'a Location>,
+    src_location_index: HashMap<u32, &'a Location>,
+    dst_location_value_index: HashMap<LocationValue, u32>,
     location_max_id: u32,
 }
 
@@ -78,7 +85,14 @@ impl State<'_> {
             .iter()
             .map(|u| Ok((parse_guid(&u.user_mark_guid)?, u.user_mark_id)))
             .collect::<Result<HashMap<_, _>>>()?;
-        let mut user_mark_max_id = self.dst.user_marks.last().map_or(0, |u| u.user_mark_id);
+        // TODO: Optimize first/last
+        let mut user_mark_max_id = self
+            .dst
+            .user_marks
+            .iter()
+            .map(|u| u.user_mark_id)
+            .max()
+            .unwrap_or(0);
 
         for src in &self.src.user_marks {
             if let Some(&existing) = guid_map.get(&parse_guid(&src.user_mark_guid)?) {
@@ -90,12 +104,8 @@ impl State<'_> {
                 );
             } else {
                 let src_id = src.user_mark_id;
-                let location = *self
-                    .location_index
-                    .get(&src.location_id)
-                    .expect("foreign key user_mark location violated");
                 let mut clone = src.clone();
-                clone.location_id = self.insert_location(location);
+                clone.location_id = self.insert_location(src.location_id);
                 user_mark_max_id += 1;
                 clone.user_mark_id = user_mark_max_id;
                 self.user_mark_translate.insert(src_id, clone.user_mark_id);
@@ -105,18 +115,23 @@ impl State<'_> {
         Ok(())
     }
 
-    fn insert_location(&mut self, location: &Location) -> u32 {
-        if let Some(&translation) = self.location_translate.get(&location.location_id) {
+    fn insert_location(&mut self, location_id: u32) -> u32 {
+        if let Some(&translation) = self.location_translate.get(&location_id) {
             translation
         } else {
-            if let Some(&equivalent) = self.location_value_index.get(&location.into()) {
+            let location = *self
+                .src_location_index
+                .get(&location_id)
+                .expect("foreign key user_mark location violated");
+            if let Some(&equivalent) = self.dst_location_value_index.get(&location.into()) {
+                self.location_translate.insert(location_id, equivalent);
                 equivalent
             } else {
                 let mut clone = location.clone();
                 self.location_max_id += 1;
                 let new_id = self.location_max_id;
                 clone.location_id = new_id;
-                self.location_translate.insert(location.location_id, new_id);
+                self.location_translate.insert(location_id, new_id);
                 self.dst.locations.push(clone);
                 new_id
             }

@@ -128,6 +128,8 @@ impl Database {
         // Replaces FixupAnomalies
         foreign_key_check(&conn)?;
 
+        read_playlist_media(&conn)?;
+
         Ok(Database {
             schema_sql: read_schema(&conn)?,
             last_modified: read_last_modified(&conn)?,
@@ -155,12 +157,15 @@ impl Database {
             database: self,
         };
         s.locations()?;
-        s.notes()?;
+        s.bookmarks()?;
         s.user_marks()?;
+        s.notes()?;
+        s.block_ranges()?;
+        // playlist_media
+        // playlist_item
+        // playlist_item_child
         s.tags()?;
         s.tag_maps()?;
-        s.block_ranges()?;
-        s.bookmarks()?;
         s.input_fields()?;
         // foreign_key_check(&conn)?;
         Ok(mem_file)
@@ -197,7 +202,7 @@ fn read_last_modified(conn: &Connection) -> rusqlite::Result<String> {
 }
 
 fn read_locations(conn: &Connection) -> rusqlite::Result<Vec<Location>> {
-    let mut stmt = conn.prepare("SELECT * FROM Location ORDER BY oid")?;
+    let mut stmt = conn.prepare("SELECT * FROM Location")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(Location {
             location_id: r.get(0)?,
@@ -216,7 +221,7 @@ fn read_locations(conn: &Connection) -> rusqlite::Result<Vec<Location>> {
 }
 
 fn read_notes(conn: &Connection) -> rusqlite::Result<Vec<Note>> {
-    let mut stmt = conn.prepare("SELECT * FROM Note ORDER BY oid")?;
+    let mut stmt = conn.prepare("SELECT * FROM Note")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(Note {
             note_id: r.get(0)?,
@@ -234,7 +239,7 @@ fn read_notes(conn: &Connection) -> rusqlite::Result<Vec<Note>> {
 }
 
 fn read_input_fields(conn: &Connection) -> rusqlite::Result<Vec<InputField>> {
-    let mut stmt = conn.prepare("SELECT * FROM InputField ORDER BY oid")?;
+    let mut stmt = conn.prepare("SELECT * FROM InputField")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(InputField {
             location_id: r.get(0)?,
@@ -246,7 +251,7 @@ fn read_input_fields(conn: &Connection) -> rusqlite::Result<Vec<InputField>> {
 }
 
 fn read_tags(conn: &Connection) -> rusqlite::Result<Vec<Tag>> {
-    let mut stmt = conn.prepare("SELECT * FROM Tag ORDER BY oid")?;
+    let mut stmt = conn.prepare("SELECT * FROM Tag")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(Tag {
             tag_id: r.get(0)?,
@@ -259,7 +264,7 @@ fn read_tags(conn: &Connection) -> rusqlite::Result<Vec<Tag>> {
 }
 
 fn read_tag_maps(conn: &Connection) -> rusqlite::Result<Vec<TagMap>> {
-    let mut stmt = conn.prepare("SELECT * FROM TagMap ORDER BY oid")?;
+    let mut stmt = conn.prepare("SELECT * FROM TagMap")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(TagMap {
             tag_read_id: r.get(0)?,
@@ -274,7 +279,7 @@ fn read_tag_maps(conn: &Connection) -> rusqlite::Result<Vec<TagMap>> {
 }
 
 fn read_block_ranges(conn: &Connection) -> rusqlite::Result<Vec<BlockRange>> {
-    let mut stmt = conn.prepare("SELECT * FROM BlockRange ORDER BY oid")?;
+    let mut stmt = conn.prepare("SELECT * FROM BlockRange")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(BlockRange {
             block_range_id: r.get(0)?,
@@ -290,7 +295,7 @@ fn read_block_ranges(conn: &Connection) -> rusqlite::Result<Vec<BlockRange>> {
 
 fn read_bookmarks(conn: &Connection) -> rusqlite::Result<Vec<Bookmark>> {
     // TODO: ORDER BY Slot? "ensure bookmarks appear in similar order to original"
-    let mut stmt = conn.prepare("SELECT * FROM Bookmark ORDER BY oid")?;
+    let mut stmt = conn.prepare("SELECT * FROM Bookmark")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(Bookmark {
             bookmark_id: r.get(0)?,
@@ -307,7 +312,7 @@ fn read_bookmarks(conn: &Connection) -> rusqlite::Result<Vec<Bookmark>> {
 }
 
 fn read_user_marks(conn: &Connection) -> rusqlite::Result<Vec<UserMark>> {
-    let mut stmt = conn.prepare("SELECT * FROM UserMark ORDER BY oid")?;
+    let mut stmt = conn.prepare("SELECT * FROM UserMark")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(UserMark {
             user_mark_id: r.get(0)?,
@@ -319,6 +324,16 @@ fn read_user_marks(conn: &Connection) -> rusqlite::Result<Vec<UserMark>> {
         })
     })?;
     rows.collect()
+}
+
+fn read_playlist_media(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("SELECT * FROM PlaylistMedia")?;
+    ensure!(
+        stmt.query(NO_PARAMS)?.next()?.is_none(),
+        "PlaylistMedia not yet implemented"
+    );
+    // TODO: Merge PlaylistMedia, PlaylistItem, PlaylistItemChild
+    Ok(())
 }
 
 struct Export<'a> {

@@ -34,6 +34,7 @@ fn merge(src: &Database, dst: &mut Database) -> Result<()> {
         dst,
     };
     s.merge_user_marks()?;
+    s.merge_input_field()?;
     Ok(())
 }
 
@@ -136,6 +137,14 @@ impl State<'_> {
                 new_id
             }
         }
+    }
+
+    fn merge_input_field(&mut self) -> Result<()> {
+        if self.src.input_fields.len() > 0 {
+            bail!("InputField merge not yet implemented");
+        }
+        // TODO: Merge InputField
+        Ok(())
     }
 }
 

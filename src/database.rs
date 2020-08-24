@@ -346,7 +346,7 @@ impl Export<'_> {
         event!(Level::DEBUG, "write locations");
         let mut stmt = self
             .conn
-            .prepare("INSERT INTO Location VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
+            .prepare("INSERT INTO Location VALUES (?,?,?,?,?,?,?,?,?,?)")?;
         for l in &self.database.locations {
             stmt.execute(params![
                 l.location_id,
@@ -365,6 +365,23 @@ impl Export<'_> {
     }
 
     fn notes(&self) -> rusqlite::Result<()> {
+        event!(Level::DEBUG, "write notes");
+        let mut stmt = self
+            .conn
+            .prepare("INSERT INTO Note VALUES (?,?,?,?,?,?,?,?,?)")?;
+        for n in &self.database.notes {
+            stmt.execute(params![
+                n.note_id,
+                n.guid,
+                n.user_mark_id,
+                n.location_id,
+                n.title,
+                n.content,
+                n.last_modified,
+                n.block_type,
+                n.block_identifier,
+            ])?;
+        }
         Ok(())
     }
 
@@ -372,7 +389,7 @@ impl Export<'_> {
         event!(Level::DEBUG, "write user_marks");
         let mut stmt = self
             .conn
-            .prepare("INSERT INTO UserMark VALUES (?, ?, ?, ?, ?, ?)")?;
+            .prepare("INSERT INTO UserMark VALUES (?,?,?,?,?,?)")?;
         for u in &self.database.user_marks {
             stmt.execute(params![
                 u.user_mark_id,
@@ -387,22 +404,76 @@ impl Export<'_> {
     }
 
     fn tags(&self) -> rusqlite::Result<()> {
+        event!(Level::DEBUG, "write tags");
+        let mut stmt = self.conn.prepare("INSERT INTO Tag VALUES (?,?,?,?)")?;
+        for t in &self.database.tags {
+            stmt.execute(params![t.tag_id, t.r#type, t.name, t.image_filename,])?;
+        }
         Ok(())
     }
 
     fn tag_maps(&self) -> rusqlite::Result<()> {
+        event!(Level::DEBUG, "write tag_maps");
+        let mut stmt = self
+            .conn
+            .prepare("INSERT INTO TagMap VALUES (?,?,?,?,?,?)")?;
+        for t in &self.database.tag_maps {
+            stmt.execute(params![
+                t.tag_read_id,
+                t.playlist_item_id,
+                t.location_id,
+                t.note_id,
+                t.tag_id,
+                t.position,
+            ])?;
+        }
         Ok(())
     }
 
     fn block_ranges(&self) -> rusqlite::Result<()> {
+        event!(Level::DEBUG, "write block_ranges");
+        let mut stmt = self
+            .conn
+            .prepare("INSERT INTO BlockRange VALUES (?,?,?,?,?,?)")?;
+        for b in &self.database.block_ranges {
+            stmt.execute(params![
+                b.block_range_id,
+                b.block_type,
+                b.identifier,
+                b.start_token,
+                b.end_token,
+                b.user_mark_id,
+            ])?;
+        }
         Ok(())
     }
 
     fn bookmarks(&self) -> rusqlite::Result<()> {
+        event!(Level::DEBUG, "write bookmarks");
+        let mut stmt = self
+            .conn
+            .prepare("INSERT INTO Bookmark VALUES (?,?,?,?,?,?,?,?)")?;
+        for b in &self.database.bookmarks {
+            stmt.execute(params![
+                b.bookmark_id,
+                b.location_id,
+                b.publication_location_id,
+                b.slot,
+                b.title,
+                b.snippet,
+                b.block_type,
+                b.block_identifier,
+            ])?;
+        }
         Ok(())
     }
 
     fn input_fields(&self) -> rusqlite::Result<()> {
+        event!(Level::DEBUG, "write input_fields");
+        let mut stmt = self.conn.prepare("INSERT INTO InputField VALUES (?,?,?)")?;
+        for i in &self.database.input_fields {
+            stmt.execute(params![i.location_id, i.text_tag, i.value,])?;
+        }
         Ok(())
     }
 }

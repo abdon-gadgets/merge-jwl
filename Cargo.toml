@@ -13,6 +13,7 @@ tracing-subscriber = { version = "0.2", features = ["json"] }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["std", "alloc"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies.rusqlite]
 git = "https://github.com/TjeuKayim/rusqlite.git"

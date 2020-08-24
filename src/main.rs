@@ -5,13 +5,12 @@ mod merger;
 use crate::cleaner::clean;
 use crate::database::Database;
 use crate::merger::merge_databases;
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{event, Level};
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Write};
-use zip::DateTime;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -46,7 +45,7 @@ fn main() -> Result<()> {
         manifest: originals[0].manifest.clone(),
         database: merge_databases(originals.into_iter().map(|o| o.database))?,
     };
-    compress(merged, &mut output_file);
+    compress(merged, &mut output_file)?;
 
     event!(Level::INFO, "Merge");
     Ok(())
@@ -108,7 +107,7 @@ fn compress(backup: BackupFile, file: &mut (impl io::Write + io::Seek)) -> Resul
         .compression_method(zip::CompressionMethod::Deflated);
     zip.set_comment("");
     zip.start_file(MANIFEST_ENTRY_NAME, options)?;
-    serde_json::to_writer(&mut zip, &backup.manifest);
+    serde_json::to_writer(&mut zip, &backup.manifest)?;
 
     let mem_file = backup.database.serialize()?;
     zip.start_file(DATABASE_ENTRY_NAME, options)?;

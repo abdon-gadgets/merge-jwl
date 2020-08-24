@@ -1,6 +1,5 @@
 use anyhow::{bail, ensure, Context, Result};
-use rusqlite::{params, Connection, DatabaseName, NO_PARAMS};
-use tracing::{event, Level};
+use rusqlite::{Connection, DatabaseName, NO_PARAMS};
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -159,7 +158,7 @@ impl Database {
         let conn = Connection::open_in_memory()?.into_borrowing();
         conn.deserialize_writable(DatabaseName::Main, &mut mem_file)?;
         for sql in &self.schema_sql {
-            conn.execute_batch(sql);
+            conn.execute_batch(sql)?;
         }
         Ok(mem_file)
     }
@@ -178,7 +177,7 @@ fn read_last_modified(conn: &Connection) -> rusqlite::Result<String> {
 }
 
 fn read_locations(conn: &Connection) -> rusqlite::Result<Vec<Location>> {
-    let mut stmt = conn.prepare("SELECT * FROM Location")?;
+    let mut stmt = conn.prepare("SELECT * FROM Location ORDER BY oid")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(Location {
             location_id: r.get(0)?,
@@ -197,7 +196,7 @@ fn read_locations(conn: &Connection) -> rusqlite::Result<Vec<Location>> {
 }
 
 fn read_notes(conn: &Connection) -> rusqlite::Result<Vec<Note>> {
-    let mut stmt = conn.prepare("SELECT * FROM Note")?;
+    let mut stmt = conn.prepare("SELECT * FROM Note ORDER BY oid")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(Note {
             note_id: r.get(0)?,
@@ -215,7 +214,7 @@ fn read_notes(conn: &Connection) -> rusqlite::Result<Vec<Note>> {
 }
 
 fn read_input_fields(conn: &Connection) -> rusqlite::Result<Vec<InputField>> {
-    let mut stmt = conn.prepare("SELECT * FROM InputField")?;
+    let mut stmt = conn.prepare("SELECT * FROM InputField ORDER BY oid")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(InputField {
             location_id: r.get(0)?,
@@ -227,7 +226,7 @@ fn read_input_fields(conn: &Connection) -> rusqlite::Result<Vec<InputField>> {
 }
 
 fn read_tags(conn: &Connection) -> rusqlite::Result<Vec<Tag>> {
-    let mut stmt = conn.prepare("SELECT * FROM Tag")?;
+    let mut stmt = conn.prepare("SELECT * FROM Tag ORDER BY oid")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(Tag {
             tag_id: r.get(0)?,
@@ -240,7 +239,7 @@ fn read_tags(conn: &Connection) -> rusqlite::Result<Vec<Tag>> {
 }
 
 fn read_tag_maps(conn: &Connection) -> rusqlite::Result<Vec<TagMap>> {
-    let mut stmt = conn.prepare("SELECT * FROM TagMap")?;
+    let mut stmt = conn.prepare("SELECT * FROM TagMap ORDER BY oid")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(TagMap {
             tag_read_id: r.get(0)?,
@@ -255,7 +254,7 @@ fn read_tag_maps(conn: &Connection) -> rusqlite::Result<Vec<TagMap>> {
 }
 
 fn read_block_ranges(conn: &Connection) -> rusqlite::Result<Vec<BlockRange>> {
-    let mut stmt = conn.prepare("SELECT * FROM BlockRange")?;
+    let mut stmt = conn.prepare("SELECT * FROM BlockRange ORDER BY oid")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(BlockRange {
             block_range_id: r.get(0)?,
@@ -270,7 +269,8 @@ fn read_block_ranges(conn: &Connection) -> rusqlite::Result<Vec<BlockRange>> {
 }
 
 fn read_bookmarks(conn: &Connection) -> rusqlite::Result<Vec<Bookmark>> {
-    let mut stmt = conn.prepare("SELECT * FROM Bookmark ORDER BY Slot")?;
+    // TODO: ORDER BY Slot? "ensure bookmarks appear in similar order to original"
+    let mut stmt = conn.prepare("SELECT * FROM Bookmark ORDER BY oid")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(Bookmark {
             bookmark_id: r.get(0)?,
@@ -287,7 +287,7 @@ fn read_bookmarks(conn: &Connection) -> rusqlite::Result<Vec<Bookmark>> {
 }
 
 fn read_user_marks(conn: &Connection) -> rusqlite::Result<Vec<UserMark>> {
-    let mut stmt = conn.prepare("SELECT * FROM UserMark")?;
+    let mut stmt = conn.prepare("SELECT * FROM UserMark ORDER BY oid")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(UserMark {
             user_mark_id: r.get(0)?,

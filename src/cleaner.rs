@@ -1,8 +1,6 @@
-use crate::{Database, Result};
-
-use tracing::{event, Level};
-
+use crate::Database;
 use std::collections::HashSet;
+use tracing::{event, Level};
 
 pub fn clean(database: &mut Database) -> usize {
     let mut c = Cleaner {

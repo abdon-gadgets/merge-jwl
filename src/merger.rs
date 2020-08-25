@@ -1,4 +1,4 @@
-use crate::database::{BlockRange, Bookmark, Location, TagMap};
+use crate::database::{BlockRange, Location, TagMap};
 use crate::{anyhow, bail, Database, Result};
 use chrono::DateTime;
 use std::collections::{HashMap, HashSet};
@@ -113,10 +113,6 @@ impl<'a> State<'a> {
             .map(|b| b.bookmark_id)
             .max()
             .unwrap_or(0);
-        fn to_index(b: &Bookmark) -> (u32, u32) {
-            (b.location_id, b.publication_location_id)
-        }
-        let index: HashSet<_> = self.dst.bookmarks.iter().map(to_index).collect();
         for mut src in self.src.bookmarks.drain(..) {
             src.location_id = self
                 .location
@@ -124,24 +120,30 @@ impl<'a> State<'a> {
             src.publication_location_id = self
                 .location
                 .get_or_insert_location(&mut self.dst.locations, src.publication_location_id);
-            if !index.contains(&to_index(&src)) {
-                max_id += 1;
-                src.bookmark_id = max_id;
-                // TODO: Optimize slot with hashing/indexing
-                src.slot = self
-                    .dst
-                    .bookmarks
-                    .iter()
-                    .filter(|b| b.publication_location_id == src.publication_location_id)
-                    .map(|b| b.slot)
-                    .chain(iter::once(10))
+            // TODO: Understand `existingBookmark = destination.FindBookmark`
+            max_id += 1;
+            src.bookmark_id = max_id;
+            // If the slot was taken, find the first empty slot, max 9
+            // TODO: Optimize slot with hashing/indexing
+            let mut slots: Vec<_> = self
+                .dst
+                .bookmarks
+                .iter()
+                .filter(|b| b.publication_location_id == src.publication_location_id)
+                .map(|b| b.slot)
+                .chain(iter::once(10)) // TODO: What happens beyond 9
+                .collect();
+            if slots.contains(&src.slot) {
+                slots.sort();
+                src.slot = slots
+                    .into_iter()
                     .enumerate()
                     .map(|(i, b)| (i as u32, b))
                     .find(|(i, b)| b != i)
                     .map(|i| i.0)
                     .ok_or_else(|| anyhow!("All bookmark slots are filled"))?;
-                self.dst.bookmarks.push(src);
             }
+            self.dst.bookmarks.push(src);
         }
         Ok(())
     }
@@ -445,6 +447,7 @@ fn parse_guid(input: &str) -> Result<u128> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::database::Bookmark;
 
     #[test]
     fn test_parse_guid() {
@@ -454,7 +457,7 @@ mod test {
     }
 
     #[test]
-    fn test_merge_bookmarks() {
+    fn test_merge_bookmarks() -> Result<()> {
         fn with_slot(slot: u32) -> Bookmark {
             Bookmark {
                 bookmark_id: 123,
@@ -481,7 +484,7 @@ mod test {
                 title: None,
             }]
         }
-        fn merge_slots(src: &[u32], dst: &[u32]) -> Vec<u32> {
+        fn merge_slots(src: &[u32], dst: &[u32]) -> Result<Vec<u32>> {
             let mut src = Database {
                 locations: some_locations(),
                 bookmarks: src.iter().copied().map(with_slot).collect(),
@@ -493,9 +496,23 @@ mod test {
                 ..Default::default()
             };
             let mut state = State::new(&mut src, &mut dst);
-            state.merge_bookmarks().unwrap();
-            dst.bookmarks.iter().map(|b| b.slot).collect()
+            state.merge_bookmarks()?;
+            let mut vec: Vec<u32> = dst.bookmarks.iter().map(|b| b.slot).collect();
+            vec.sort();
+            Ok(vec)
         }
-        assert_eq!(&merge_slots(&[0, 1], &[3]), &[0, 1, 3]);
+        assert_eq!(&merge_slots(&[3, 4], &[1])?, &[1, 3, 4]);
+        assert_eq!(&merge_slots(&[0, 1], &[3])?, &[0, 1, 3]);
+        assert_eq!(&merge_slots(&[8], &[8])?, &[0, 8]);
+        assert_eq!(&merge_slots(&[3], &[0, 3])?, &[0, 1, 3]);
+        assert_eq!(&merge_slots(&[0], &[0, 1, 2, 8, 9])?, &[0, 1, 2, 3, 8, 9]);
+        assert_eq!(&merge_slots(&[0, 3], &[0, 2, 4, 6])?, &[0, 1, 2, 3, 4, 6]);
+        assert_eq!(
+            &merge_slots(&[1, 3], &[0, 1, 2, 3, 4, 5, 6, 7])?,
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        );
+        merge_slots(&[1, 3], &[0, 1, 2, 3, 4, 5, 6, 7, 8]).unwrap_err();
+        merge_slots(&[7], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap_err();
+        Ok(())
     }
 }

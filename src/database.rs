@@ -1,5 +1,6 @@
 use anyhow::{bail, ensure, Context, Result};
 use rusqlite::{params, Connection, DatabaseName, NO_PARAMS};
+use std::rc::Rc;
 use tracing::{event, Level};
 
 #[derive(Debug, Clone)]
@@ -24,7 +25,7 @@ pub struct Location {
     pub document_id: Option<u32>,
     pub track: Option<u32>,
     pub issue_tag_number: u32,
-    pub key_symbol: Option<String>,
+    pub key_symbol: Option<Rc<String>>,
     pub meps_language: u32,
     pub r#type: u32,
     pub title: Option<String>,
@@ -211,7 +212,8 @@ fn read_locations(conn: &Connection) -> rusqlite::Result<Vec<Location>> {
             document_id: r.get(3)?,
             track: r.get(4)?,
             issue_tag_number: r.get(5)?,
-            key_symbol: r.get(6)?,
+            // TODO: Optimize string pool deduplicate
+            key_symbol: r.get::<_, Option<String>>(6)?.map(|k| Rc::new(k)),
             meps_language: r.get(7)?,
             r#type: r.get(8)?,
             title: r.get(9)?,

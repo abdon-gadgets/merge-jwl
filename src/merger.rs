@@ -2,28 +2,33 @@ use crate::database::Location;
 use crate::{anyhow, bail, Database, Result};
 use chrono::DateTime;
 use std::collections::HashMap;
+use std::rc::Rc;
 use tracing::{event, Level};
 
 pub fn merge_databases(mut originals: impl Iterator<Item = Database>) -> Result<Database> {
     let mut result = originals.next().ok_or_else(|| anyhow!("At least 1 db"))?;
-    for database in originals {
+    for mut database in originals {
         event!(Level::DEBUG, "Merge databases");
-        merge(&database, &mut result)?;
+        merge(&mut database, &mut result)?;
     }
     Ok(result)
 }
 
-fn merge(src: &Database, dst: &mut Database) -> Result<()> {
+fn merge(src: &mut Database, dst: &mut Database) -> Result<()> {
     let mut s = State {
         user_mark_translate: HashMap::new(),
         location: LocationState {
             location_translate: HashMap::new(),
             // TODO: Lazy initialization of indices
-            src_location_index: src.locations.iter().map(|l| (l.location_id, l)).collect(),
+            src_location_index: src
+                .locations
+                .drain(..)
+                .map(|l| (l.location_id, l))
+                .collect(),
             dst_location_value_index: dst
                 .locations
                 .iter()
-                .map(|l| (l.into(), l.location_id))
+                .map(|l| (LocationValue::from(l), l.location_id))
                 .collect(),
             // TODO: Optimize first/last
             location_max_id: dst
@@ -47,15 +52,15 @@ fn merge(src: &Database, dst: &mut Database) -> Result<()> {
 }
 
 struct State<'a> {
-    src: &'a Database,
+    src: &'a mut Database,
     dst: &'a mut Database,
     user_mark_translate: HashMap<u32, u32>,
-    location: LocationState<'a>,
+    location: LocationState,
 }
 
-struct LocationState<'a> {
+struct LocationState {
     location_translate: HashMap<u32, u32>,
-    src_location_index: HashMap<u32, &'a Location>,
+    src_location_index: HashMap<u32, Location>,
     dst_location_value_index: HashMap<LocationValue, u32>,
     location_max_id: u32,
 }
@@ -67,12 +72,12 @@ struct LocationValue {
     document_id: Option<u32>,
     track: Option<u32>,
     issue_tag_number: u32,
-    key_symbol: Option<String>,
+    key_symbol: Option<Rc<String>>,
     meps_language: u32,
     r#type: u32,
 }
 
-impl From<&Location> for LocationValue {
+impl LocationValue {
     fn from(location: &Location) -> Self {
         LocationValue {
             book_number: location.book_number,
@@ -92,7 +97,7 @@ impl State<'_> {
         if self.src.bookmarks.len() == 0 {
             return Ok(());
         }
-        todo!();
+        // TODO:
         Ok(())
     }
 
@@ -115,7 +120,7 @@ impl State<'_> {
             .max()
             .unwrap_or(0);
 
-        for src in &self.src.user_marks {
+        for mut src in self.src.user_marks.drain(..) {
             if let Some(&existing) = guid_map.get(&parse_guid(&src.user_mark_guid)?) {
                 assert!(
                     self.user_mark_translate
@@ -125,14 +130,13 @@ impl State<'_> {
                 );
             } else {
                 let src_id = src.user_mark_id;
-                let mut clone = src.clone();
-                clone.location_id = self
+                src.location_id = self
                     .location
                     .insert_location(&mut self.dst.locations, src.location_id);
                 user_mark_max_id += 1;
-                clone.user_mark_id = user_mark_max_id;
-                self.user_mark_translate.insert(src_id, clone.user_mark_id);
-                self.dst.user_marks.push(clone);
+                src.user_mark_id = user_mark_max_id;
+                self.user_mark_translate.insert(src_id, src.user_mark_id);
+                self.dst.user_marks.push(src);
             }
         }
         Ok(())
@@ -143,16 +147,15 @@ impl State<'_> {
             return Ok(());
         }
         let mut new_notes = Vec::new();
-        let mut max_note_id = self.dst.notes.iter().map(|n| n.note_id).max().unwrap_or(0);
-        let mut guid_map = self
-            .dst
-            .notes
+        let notes = &mut self.dst.notes;
+        let mut max_note_id = notes.iter().map(|n| n.note_id).max().unwrap_or(0);
+        let mut guid_map = notes
             .iter_mut()
             .map(|n| Ok((parse_guid(&n.guid)?, n)))
             .collect::<Result<HashMap<_, _>>>()?;
         let mut translate = HashMap::new();
         // TODO: Optimize drain src so content does not have to be copied
-        for src in &self.src.notes {
+        for mut src in self.src.notes.drain(..) {
             if let Some(dst) = guid_map.get_mut(&parse_guid(&src.guid)?) {
                 let src_time = DateTime::parse_from_rfc3339(&src.last_modified)?;
                 let dst_time = DateTime::parse_from_rfc3339(&dst.last_modified)?;
@@ -165,13 +168,12 @@ impl State<'_> {
                 translate.insert(src.note_id, dst.note_id);
             } else {
                 // insert note
-                let mut clone = src.clone();
                 max_note_id += 1;
                 let new_id = max_note_id;
-                clone.note_id = new_id;
                 translate.insert(src.note_id, new_id);
+                src.note_id = new_id;
                 if let Some(user_mark_id) = src.user_mark_id {
-                    clone.user_mark_id = Some(
+                    src.user_mark_id = Some(
                         self.user_mark_translate
                             .get(&user_mark_id)
                             .copied()
@@ -181,7 +183,7 @@ impl State<'_> {
                 if let Some(location_id) = src.location_id {
                     let location = &mut self.location;
                     let dst_locations = &mut self.dst.locations;
-                    clone.location_id = Some(
+                    src.location_id = Some(
                         location
                             .location_translate
                             .get(&location_id)
@@ -191,10 +193,10 @@ impl State<'_> {
                             }),
                     );
                 }
-                new_notes.push(clone);
+                new_notes.push(src);
             }
         }
-        self.dst.notes.extend(new_notes);
+        notes.extend(new_notes);
         Ok(())
     }
 
@@ -202,7 +204,7 @@ impl State<'_> {
         if self.src.block_ranges.len() == 0 {
             return Ok(());
         }
-        todo!();
+        // TODO:
         Ok(())
     }
 
@@ -210,7 +212,7 @@ impl State<'_> {
         if self.src.tags.len() == 0 {
             return Ok(());
         }
-        todo!();
+        // TODO:
         Ok(())
     }
 
@@ -218,7 +220,7 @@ impl State<'_> {
         if self.src.tag_maps.len() == 0 {
             return Ok(());
         }
-        todo!();
+        // TODO:
         Ok(())
     }
 
@@ -230,25 +232,27 @@ impl State<'_> {
     }
 }
 
-impl LocationState<'_> {
+impl LocationState {
     fn insert_location(&mut self, dst: &mut Vec<Location>, location_id: u32) -> u32 {
         if let Some(&translation) = self.location_translate.get(&location_id) {
             translation
         } else {
-            let location = *self
+            let mut location = self
                 .src_location_index
-                .get(&location_id)
+                .remove(&location_id)
                 .expect("Foreign key UserMark Location violated");
-            if let Some(&equivalent) = self.dst_location_value_index.get(&location.into()) {
+            if let Some(&equivalent) = self
+                .dst_location_value_index
+                .get(&LocationValue::from(&location))
+            {
                 self.location_translate.insert(location_id, equivalent);
                 equivalent
             } else {
-                let mut clone = location.clone();
                 self.location_max_id += 1;
                 let new_id = self.location_max_id;
-                clone.location_id = new_id;
+                location.location_id = new_id;
                 self.location_translate.insert(location_id, new_id);
-                dst.push(clone);
+                dst.push(location);
                 new_id
             }
         }

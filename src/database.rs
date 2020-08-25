@@ -3,9 +3,9 @@ use rusqlite::{params, Connection, DatabaseName, NO_PARAMS};
 use std::rc::Rc;
 use tracing::{event, Level};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Database {
-    schema_sql: Vec<String>, // TODO: Optimize to do this only once
+    pub schema_sql: Vec<String>, // TODO: Optimize to do this only once
     pub last_modified: String,
     pub locations: Vec<Location>,
     pub notes: Vec<Note>,

@@ -1,7 +1,8 @@
-use crate::database::{BlockRange, Location, TagMap};
+use crate::database::{BlockRange, Bookmark, Location, TagMap};
 use crate::{anyhow, bail, Database, Result};
 use chrono::DateTime;
 use std::collections::{HashMap, HashSet};
+use std::iter;
 use std::rc::Rc;
 use tracing::{event, Level};
 
@@ -15,34 +16,7 @@ pub fn merge_databases(mut originals: impl Iterator<Item = Database>) -> Result<
 }
 
 fn merge(src: &mut Database, dst: &mut Database) -> Result<()> {
-    let mut s = State {
-        user_mark_translate: HashMap::new(),
-        note_translate: HashMap::new(),
-        tag_translate: HashMap::new(),
-        location: LocationState {
-            location_translate: HashMap::new(),
-            // TODO: Lazy initialization of indices
-            src_location_index: src
-                .locations
-                .drain(..)
-                .map(|l| (l.location_id, l))
-                .collect(),
-            dst_location_value_index: dst
-                .locations
-                .iter()
-                .map(|l| (LocationValue::from(l), l.location_id))
-                .collect(),
-            // TODO: Optimize first/last
-            location_max_id: dst
-                .locations
-                .iter()
-                .map(|l| l.location_id)
-                .max()
-                .unwrap_or(0),
-        },
-        src,
-        dst,
-    };
+    let mut s = State::new(src, dst);
     s.merge_bookmarks()?;
     s.merge_user_marks()?;
     s.merge_notes()?;
@@ -96,12 +70,79 @@ impl LocationValue {
     }
 }
 
-impl State<'_> {
+impl<'a> State<'a> {
+    fn new(src: &'a mut Database, dst: &'a mut Database) -> Self {
+        State {
+            user_mark_translate: HashMap::new(),
+            note_translate: HashMap::new(),
+            tag_translate: HashMap::new(),
+            location: LocationState {
+                location_translate: HashMap::new(),
+                // TODO: Lazy initialization of indices
+                src_location_index: src
+                    .locations
+                    .drain(..)
+                    .map(|l| (l.location_id, l))
+                    .collect(),
+                dst_location_value_index: dst
+                    .locations
+                    .iter()
+                    .map(|l| (LocationValue::from(l), l.location_id))
+                    .collect(),
+                // TODO: Optimize first/last
+                location_max_id: dst
+                    .locations
+                    .iter()
+                    .map(|l| l.location_id)
+                    .max()
+                    .unwrap_or(0),
+            },
+            src,
+            dst,
+        }
+    }
+
     fn merge_bookmarks(&mut self) -> Result<()> {
         if self.src.bookmarks.is_empty() {
             return Ok(());
         }
-        // TODO:
+        let mut max_id = self
+            .dst
+            .bookmarks
+            .iter()
+            .map(|b| b.bookmark_id)
+            .max()
+            .unwrap_or(0);
+        fn to_index(b: &Bookmark) -> (u32, u32) {
+            (b.location_id, b.publication_location_id)
+        }
+        let index: HashSet<_> = self.dst.bookmarks.iter().map(to_index).collect();
+        for mut src in self.src.bookmarks.drain(..) {
+            src.location_id = self
+                .location
+                .get_or_insert_location(&mut self.dst.locations, src.location_id);
+            src.publication_location_id = self
+                .location
+                .get_or_insert_location(&mut self.dst.locations, src.publication_location_id);
+            if !index.contains(&to_index(&src)) {
+                max_id += 1;
+                src.bookmark_id = max_id;
+                // TODO: Optimize slot with hashing/indexing
+                src.slot = self
+                    .dst
+                    .bookmarks
+                    .iter()
+                    .filter(|b| b.publication_location_id == src.publication_location_id)
+                    .map(|b| b.slot)
+                    .chain(iter::once(10))
+                    .enumerate()
+                    .map(|(i, b)| (i as u32, b))
+                    .find(|(i, b)| b != i)
+                    .map(|i| i.0)
+                    .ok_or_else(|| anyhow!("All bookmark slots are filled"))?;
+                self.dst.bookmarks.push(src);
+            }
+        }
         Ok(())
     }
 
@@ -339,7 +380,7 @@ impl LocationState {
             let mut location = self
                 .src_location_index
                 .remove(&location_id)
-                .expect("Foreign key UserMark Location violated");
+                .expect("Foreign key LocationId violated");
             if let Some(&equivalent) = self
                 .dst_location_value_index
                 .get(&LocationValue::from(&location))
@@ -410,5 +451,51 @@ mod test {
         let r = parse_guid("c88af989-da73-4745-bccc-8476f9950a3c").unwrap();
         dbg!(format!("{:x}", r));
         assert_eq!(r, 0xc88af989_da73_4745_bccc_8476f9950a3c);
+    }
+
+    #[test]
+    fn test_merge_bookmarks() {
+        fn with_slot(slot: u32) -> Bookmark {
+            Bookmark {
+                bookmark_id: 123,
+                location_id: 123,
+                publication_location_id: 123,
+                slot,
+                title: "foo".to_string(),
+                snippet: Some("bar".to_string()),
+                block_type: 1,
+                block_identifier: Some(18),
+            }
+        }
+        fn some_locations() -> Vec<Location> {
+            vec![Location {
+                location_id: 123,
+                book_number: None,
+                chapter_number: None,
+                document_id: None,
+                track: None,
+                issue_tag_number: 123,
+                key_symbol: None,
+                meps_language: 123,
+                r#type: 123,
+                title: None,
+            }]
+        }
+        fn merge_slots(src: &[u32], dst: &[u32]) -> Vec<u32> {
+            let mut src = Database {
+                locations: some_locations(),
+                bookmarks: src.iter().copied().map(with_slot).collect(),
+                ..Default::default()
+            };
+            let mut dst = Database {
+                locations: some_locations(),
+                bookmarks: dst.iter().copied().map(with_slot).collect(),
+                ..Default::default()
+            };
+            let mut state = State::new(&mut src, &mut dst);
+            state.merge_bookmarks().unwrap();
+            dst.bookmarks.iter().map(|b| b.slot).collect()
+        }
+        assert_eq!(&merge_slots(&[0, 1], &[3]), &[0, 1, 3]);
     }
 }

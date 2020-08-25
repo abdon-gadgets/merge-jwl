@@ -61,7 +61,7 @@ pub struct Tag {
 
 #[derive(Debug, Clone)]
 pub struct TagMap {
-    pub tag_read_id: u32,
+    pub tag_map_id: u32,
     pub playlist_item_id: Option<u32>,
     pub location_id: Option<u32>,
     pub note_id: Option<u32>,
@@ -149,7 +149,7 @@ impl Database {
         let mut mem_file = Vec::new(); // TODO: Guess size
         let conn = Connection::open_in_memory()?.into_borrowing();
         conn.deserialize_writable(DatabaseName::Main, &mut mem_file)?;
-        // conn.execute_batch("PRAGMA foreign_keys=0")?;
+        conn.execute_batch("PRAGMA foreign_keys=0")?;
         for sql in &self.schema_sql {
             conn.execute_batch(sql)?;
         }
@@ -159,6 +159,7 @@ impl Database {
         };
         s.locations()?;
         s.bookmarks()?;
+        s.input_fields()?;
         s.user_marks()?;
         s.notes()?;
         s.block_ranges()?;
@@ -167,8 +168,7 @@ impl Database {
         // playlist_item_child
         s.tags()?;
         s.tag_maps()?;
-        s.input_fields()?;
-        // foreign_key_check(&conn)?;
+        foreign_key_check(&conn)?;
         Ok(mem_file)
     }
 }
@@ -213,7 +213,7 @@ fn read_locations(conn: &Connection) -> rusqlite::Result<Vec<Location>> {
             track: r.get(4)?,
             issue_tag_number: r.get(5)?,
             // TODO: Optimize string cache deduplicate
-            key_symbol: r.get::<_, Option<String>>(6)?.map(|k| Rc::new(k)),
+            key_symbol: r.get::<_, Option<String>>(6)?.map(Rc::new),
             meps_language: r.get(7)?,
             r#type: r.get(8)?,
             title: r.get(9)?,
@@ -269,7 +269,7 @@ fn read_tag_maps(conn: &Connection) -> rusqlite::Result<Vec<TagMap>> {
     let mut stmt = conn.prepare("SELECT * FROM TagMap")?;
     let rows = stmt.query_map(NO_PARAMS, |r| {
         Ok(TagMap {
-            tag_read_id: r.get(0)?,
+            tag_map_id: r.get(0)?,
             playlist_item_id: r.get(1)?,
             location_id: r.get(2)?,
             note_id: r.get(3)?,
@@ -421,7 +421,7 @@ impl Export<'_> {
             .prepare("INSERT INTO TagMap VALUES (?,?,?,?,?,?)")?;
         for t in &self.database.tag_maps {
             stmt.execute(params![
-                t.tag_read_id,
+                t.tag_map_id,
                 t.playlist_item_id,
                 t.location_id,
                 t.note_id,

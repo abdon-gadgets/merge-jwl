@@ -1,7 +1,7 @@
-use crate::database::{BlockRange, Location};
+use crate::database::{BlockRange, Location, TagMap};
 use crate::{anyhow, bail, Database, Result};
 use chrono::DateTime;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use tracing::{event, Level};
 
@@ -17,6 +17,8 @@ pub fn merge_databases(mut originals: impl Iterator<Item = Database>) -> Result<
 fn merge(src: &mut Database, dst: &mut Database) -> Result<()> {
     let mut s = State {
         user_mark_translate: HashMap::new(),
+        note_translate: HashMap::new(),
+        tag_translate: HashMap::new(),
         location: LocationState {
             location_translate: HashMap::new(),
             // TODO: Lazy initialization of indices
@@ -55,6 +57,8 @@ struct State<'a> {
     src: &'a mut Database,
     dst: &'a mut Database,
     user_mark_translate: HashMap<u32, u32>,
+    note_translate: HashMap<u32, u32>,
+    tag_translate: HashMap<u32, u32>,
     location: LocationState,
 }
 
@@ -94,7 +98,7 @@ impl LocationValue {
 
 impl State<'_> {
     fn merge_bookmarks(&mut self) -> Result<()> {
-        if self.src.bookmarks.len() == 0 {
+        if self.src.bookmarks.is_empty() {
             return Ok(());
         }
         // TODO:
@@ -102,7 +106,7 @@ impl State<'_> {
     }
 
     fn merge_user_marks(&mut self) -> Result<()> {
-        if self.src.user_marks.len() == 0 {
+        if self.src.user_marks.is_empty() {
             return Ok(());
         }
         let guid_map = self
@@ -143,7 +147,7 @@ impl State<'_> {
     }
 
     fn merge_notes(&mut self) -> Result<()> {
-        if self.src.notes.len() == 0 {
+        if self.src.notes.is_empty() {
             return Ok(());
         }
         let mut new_notes = Vec::new();
@@ -153,8 +157,6 @@ impl State<'_> {
             .iter_mut()
             .map(|n| Ok((parse_guid(&n.guid)?, n)))
             .collect::<Result<HashMap<_, _>>>()?;
-        let mut translate = HashMap::new();
-        // TODO: Optimize drain src so content does not have to be copied
         for mut src in self.src.notes.drain(..) {
             if let Some(dst) = guid_map.get_mut(&parse_guid(&src.guid)?) {
                 let src_time = DateTime::parse_from_rfc3339(&src.last_modified)?;
@@ -165,12 +167,12 @@ impl State<'_> {
                     dst.content = src.content.clone();
                     dst.last_modified = src.last_modified.clone();
                 }
-                translate.insert(src.note_id, dst.note_id);
+                self.note_translate.insert(src.note_id, dst.note_id);
             } else {
                 // insert note
                 max_note_id += 1;
                 let new_id = max_note_id;
-                translate.insert(src.note_id, new_id);
+                self.note_translate.insert(src.note_id, new_id);
                 src.note_id = new_id;
                 if let Some(user_mark_id) = src.user_mark_id {
                     src.user_mark_id = Some(
@@ -181,16 +183,9 @@ impl State<'_> {
                     );
                 }
                 if let Some(location_id) = src.location_id {
-                    let location = &mut self.location;
-                    let dst_locations = &mut self.dst.locations;
                     src.location_id = Some(
-                        location
-                            .location_translate
-                            .get(&location_id)
-                            .copied()
-                            .unwrap_or_else(|| {
-                                location.insert_location(dst_locations, location_id)
-                            }),
+                        self.location
+                            .get_or_insert_location(&mut self.dst.locations, location_id),
                     );
                 }
                 new_notes.push(src);
@@ -201,7 +196,7 @@ impl State<'_> {
     }
 
     fn merge_block_ranges(&mut self) -> Result<()> {
-        if self.src.block_ranges.len() == 0 {
+        if self.src.block_ranges.is_empty() {
             return Ok(());
         }
         let mut max_id = self
@@ -219,7 +214,7 @@ impl State<'_> {
                 .expect("Foreign key BlockRange UserMark violated");
             let existing = group_by_user_mark
                 .entry(user_mark_id)
-                .or_insert_with(|| Vec::new());
+                .or_insert_with(Vec::new);
             if existing.iter().any(|b| block_ranges_overlap(b, &src)) {
                 event!(Level::DEBUG, "Remove overlapping BlockRange {:?}", &src);
             } else {
@@ -234,23 +229,102 @@ impl State<'_> {
     }
 
     fn merge_tags(&mut self) -> Result<()> {
-        if self.src.tags.len() == 0 {
+        if self.src.tags.is_empty() {
             return Ok(());
         }
-        // TODO:
+        let index: HashMap<_, _> = self
+            .dst
+            .tags
+            .iter()
+            .map(|t| ((t.r#type, &t.name), t.tag_id))
+            .collect();
+        // TODO: Optimize max_id loops twice
+        let mut max_id = self.dst.tags.iter().map(|t| t.tag_id).max().unwrap_or(0);
+        let mut new_tags = Vec::with_capacity(self.src.tags.len());
+        for mut src in self.src.tags.drain(..) {
+            if let Some(existing) = index.get(&(src.r#type, &src.name)) {
+                self.tag_translate.insert(src.tag_id, *existing);
+            } else {
+                max_id += 1;
+                self.tag_translate.insert(src.tag_id, max_id);
+                src.tag_id = max_id;
+                new_tags.push(src);
+            }
+        }
+        self.dst.tags.extend(new_tags);
         Ok(())
     }
 
     fn merge_tag_maps(&mut self) -> Result<()> {
-        if self.src.tag_maps.len() == 0 {
+        if self.src.tag_maps.is_empty() {
             return Ok(());
         }
-        // TODO:
+        let mut max_id = self
+            .dst
+            .tag_maps
+            .iter()
+            .map(|t| t.tag_map_id)
+            .max()
+            .unwrap_or(0);
+        let location_index: HashSet<_> = self
+            .dst
+            .tag_maps
+            .iter()
+            .filter_map(|t| Some((t.tag_id, t.location_id?)))
+            .collect();
+        let note_index: HashSet<_> = self
+            .dst
+            .tag_maps
+            .iter()
+            .filter_map(|t| Some((t.tag_id, t.note_id?)))
+            .collect();
+        for mut src in self.src.tag_maps.drain(..) {
+            let tag_id = *self
+                .tag_translate
+                .get(&src.tag_id)
+                .expect("Foreign key TagMap Tag violated");
+            src.tag_id = tag_id;
+            if let Some(location_id) = src.location_id {
+                let location_id = self
+                    .location
+                    .get_or_insert_location(&mut self.dst.locations, location_id);
+                // TODO: It is not known if location was equivalent translation
+                if !location_index.contains(&(tag_id, location_id)) {
+                    src.location_id = Some(location_id);
+                    insert_tag_map(self.dst, &mut max_id, src);
+                }
+            } else if let Some(note_id) = src.note_id {
+                let note_id = *self
+                    .note_translate
+                    .get(&note_id)
+                    .expect("Foreign key TagMap Note violated");
+                if !note_index.contains(&(tag_id, note_id)) {
+                    src.note_id = Some(note_id);
+                    insert_tag_map(self.dst, &mut max_id, src);
+                }
+            } else if let Some(_playlist_item_id) = src.playlist_item_id {
+                // TODO: Implement playlist
+            } else {
+                panic!("Check constraint TagMap violated");
+            }
+        }
+        self.normalize_tag_map_positions();
         Ok(())
     }
 
+    fn normalize_tag_map_positions(&mut self) {
+        // unique constraint on TagId, Position
+        let mut tag_groups = HashMap::with_capacity(self.dst.tags.len());
+        self.dst.tag_maps.sort_by_key(|t| t.position);
+        for tag_map in &mut self.dst.tag_maps {
+            let position = tag_groups.entry(tag_map.tag_id).or_insert(0);
+            tag_map.position = *position;
+            *position += 1;
+        }
+    }
+
     fn merge_input_field(&mut self) -> Result<()> {
-        if self.src.input_fields.len() == 0 {
+        if self.src.input_fields.is_empty() {
             return Ok(());
         }
         bail!("InputField merge not yet implemented");
@@ -282,6 +356,13 @@ impl LocationState {
             }
         }
     }
+
+    fn get_or_insert_location(&mut self, dst: &mut Vec<Location>, id: u32) -> u32 {
+        self.location_translate
+            .get(&id)
+            .copied()
+            .unwrap_or_else(|| self.insert_location(dst, id))
+    }
 }
 
 fn block_ranges_overlap(a: &BlockRange, b: &BlockRange) -> bool {
@@ -296,6 +377,12 @@ fn block_ranges_overlap(a: &BlockRange, b: &BlockRange) -> bool {
     } else {
         b.start_token < a.end_token && b.end_token > a.start_token
     }
+}
+
+fn insert_tag_map(dst: &mut Database, max_id: &mut u32, mut src: TagMap) {
+    *max_id += 1;
+    src.tag_map_id = *max_id;
+    dst.tag_maps.push(src);
 }
 
 fn parse_guid(input: &str) -> Result<u128> {

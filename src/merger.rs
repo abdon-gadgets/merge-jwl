@@ -1,4 +1,4 @@
-use crate::database::Location;
+use crate::database::{BlockRange, Location};
 use crate::{anyhow, bail, Database, Result};
 use chrono::DateTime;
 use std::collections::HashMap;
@@ -204,7 +204,32 @@ impl State<'_> {
         if self.src.block_ranges.len() == 0 {
             return Ok(());
         }
-        // TODO:
+        let mut max_id = self
+            .dst
+            .block_ranges
+            .iter()
+            .map(|b| b.block_range_id)
+            .max()
+            .unwrap_or(0);
+        let mut group_by_user_mark = HashMap::with_capacity(self.dst.user_marks.len());
+        for mut src in self.src.block_ranges.drain(..) {
+            let user_mark_id = *self
+                .user_mark_translate
+                .get(&src.user_mark_id)
+                .expect("Foreign key BlockRange UserMark violated");
+            let existing = group_by_user_mark
+                .entry(user_mark_id)
+                .or_insert_with(|| Vec::new());
+            if existing.iter().any(|b| block_ranges_overlap(b, &src)) {
+                event!(Level::DEBUG, "Remove overlapping BlockRange {:?}", &src);
+            } else {
+                existing.push(src.clone()); // this clone is cheap
+                max_id += 1;
+                src.block_range_id = max_id;
+                src.user_mark_id = user_mark_id;
+                self.dst.block_ranges.push(src);
+            }
+        }
         Ok(())
     }
 
@@ -256,6 +281,20 @@ impl LocationState {
                 new_id
             }
         }
+    }
+}
+
+fn block_ranges_overlap(a: &BlockRange, b: &BlockRange) -> bool {
+    if a.start_token == b.start_token && a.end_token == b.end_token {
+        true
+    } else if a.start_token.is_none()
+        || a.end_token.is_none()
+        || b.start_token.is_none()
+        || b.end_token.is_none()
+    {
+        false
+    } else {
+        b.start_token < a.end_token && b.end_token > a.start_token
     }
 }
 

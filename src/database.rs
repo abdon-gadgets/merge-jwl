@@ -212,7 +212,7 @@ fn read_locations(conn: &Connection) -> rusqlite::Result<Vec<Location>> {
             document_id: r.get(3)?,
             track: r.get(4)?,
             issue_tag_number: r.get(5)?,
-            // TODO: Optimize string pool deduplicate
+            // TODO: Optimize string cache deduplicate
             key_symbol: r.get::<_, Option<String>>(6)?.map(|k| Rc::new(k)),
             meps_language: r.get(7)?,
             r#type: r.get(8)?,

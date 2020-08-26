@@ -92,7 +92,6 @@ struct UserDataBackup {
 }
 
 const MANIFEST_ENTRY_NAME: &str = "manifest.json";
-const DATABASE_ENTRY_NAME: &str = "userData.db";
 
 fn load(file: impl io::Read + io::Seek) -> Result<Backup> {
     let mut zip = zip::ZipArchive::new(file).context("Unzip .jwlibrary")?;
@@ -105,15 +104,9 @@ fn load(file: impl io::Read + io::Seek) -> Result<Backup> {
     ensure!(ver == 1, "Unsupported database version {}", ver);
     let ver = manifest.user_data_backup.schema_version;
     ensure!(ver == 8, "Unsupported database version {}", ver);
-    let database_name = &manifest.user_data_backup.database_name;
-    ensure!(
-        database_name == DATABASE_ENTRY_NAME,
-        "Unexpected databaseName {}",
-        database_name
-    );
 
     let mut database_entry = zip
-        .by_name(DATABASE_ENTRY_NAME)
+        .by_name(&manifest.user_data_backup.database_name)
         .context("Find database entry")?;
     let mut mem_file = Vec::with_capacity(database_entry.size() as _);
     io::copy(&mut database_entry, &mut mem_file).context("Read database to memory")?;
@@ -170,7 +163,7 @@ fn compress(
     zip.start_file(MANIFEST_ENTRY_NAME, options)?;
     serde_json::to_writer(&mut zip, &manifest)?;
 
-    zip.start_file(DATABASE_ENTRY_NAME, options)?;
+    zip.start_file(&manifest.user_data_backup.database_name, options)?;
     zip.write_all(&database)?;
     zip.finish()?;
     Ok(())

@@ -25,7 +25,8 @@ fn main() -> Result<()> {
     let mut output_file =
         File::create(args.last().unwrap()).context("Couldn't open output file")?;
 
-    let mut originals = Vec::with_capacity(input_files.len());
+    let mut databases = Vec::with_capacity(input_files.len());
+    let mut manifests = Vec::with_capacity(input_files.len());
     for input in input_files {
         event!(Level::INFO, "Loading {:?}", &input);
         let mut backup = load(input)?;
@@ -38,14 +39,14 @@ fn main() -> Result<()> {
             rows_removed,
             name
         );
-        originals.push(backup);
+        databases.push(backup.database);
+        manifests.push(backup.manifest);
     }
-    // pick the first manifest as the basis for the manifest in the final merged file
-    let merged = BackupFile {
-        manifest: originals[0].manifest.clone(),
-        database: merge_databases(originals.into_iter().map(|o| o.database))?,
-    };
-    compress(merged, &mut output_file)?;
+
+    let merged = merge_databases(databases.into_iter())?;
+    let mem_file = merged.serialize()?;
+    let manifest = update_manifest(&manifests, compute_hash(&mem_file));
+    compress(manifest, mem_file, &mut output_file)?;
 
     event!(Level::INFO, "Merge");
     Ok(())
@@ -71,6 +72,7 @@ struct Manifest {
 struct UserDataBackup {
     last_modified_date: String,
     device_name: String,
+    database_name: String,
     hash: String,
     schema_version: i32,
 }
@@ -89,29 +91,86 @@ fn load(file: impl io::Read + io::Seek) -> Result<BackupFile> {
     ensure!(ver == 1, "Unsupported database version {}", ver);
     let ver = manifest.user_data_backup.schema_version;
     ensure!(ver == 8, "Unsupported database version {}", ver);
+    let database_name = &manifest.user_data_backup.database_name;
+    ensure!(
+        database_name == DATABASE_ENTRY_NAME,
+        "Unexpected databaseName {}",
+        database_name
+    );
 
     let mut database_entry = zip
         .by_name(DATABASE_ENTRY_NAME)
         .context("Find database entry")?;
     let mut mem_file = Vec::with_capacity(database_entry.size() as _);
     io::copy(&mut database_entry, &mut mem_file).context("Read database to memory")?;
+    ensure!(
+        &compute_hash(&mem_file) == &manifest.user_data_backup.hash,
+        "Hash mismatch"
+    );
 
     let database = Database::read(mem_file)?;
     Ok(BackupFile { manifest, database })
 }
 
-fn compress(backup: BackupFile, file: &mut (impl io::Write + io::Seek)) -> Result<()> {
+fn compute_hash(file: &[u8]) -> String {
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(file);
+    format!("{:x}", hash)
+}
+
+fn update_manifest(originals: &[Manifest], hash: String) -> Manifest {
+    let date = "2020-08-26";
+    // pick the first manifest as the basis for the manifest in the final merged file
+    let base = &originals[0];
+    let device_name: Vec<&String> = originals
+        .iter()
+        .map(|d| &d.user_data_backup.device_name)
+        .collect();
+    let device_name = serde_json::to_string(&device_name).unwrap();
+    Manifest {
+        name: format!("merged_{}", date),
+        creation_date: date.to_string(),
+        user_data_backup: UserDataBackup {
+            last_modified_date: base.user_data_backup.last_modified_date.to_string(),
+            device_name,
+            hash,
+            database_name: base.user_data_backup.database_name.to_string(),
+            schema_version: base.user_data_backup.schema_version,
+        },
+        version: base.version,
+        r#type: base.r#type,
+    }
+}
+
+fn compress(
+    manifest: Manifest,
+    database: Vec<u8>,
+    file: &mut (impl io::Write + io::Seek),
+) -> Result<()> {
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::FileOptions::default()
         // TODO .last_modified_time()
         .compression_method(zip::CompressionMethod::Deflated);
     zip.set_comment("");
     zip.start_file(MANIFEST_ENTRY_NAME, options)?;
-    serde_json::to_writer(&mut zip, &backup.manifest)?;
+    serde_json::to_writer(&mut zip, &manifest)?;
 
-    let mem_file = backup.database.serialize()?;
     zip.start_file(DATABASE_ENTRY_NAME, options)?;
-    zip.write_all(&mem_file)?;
+    zip.write_all(&database)?;
     zip.finish()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use crate::compute_hash;
+
+    #[test]
+    fn test_hash() {
+        let hash = compute_hash(b"hello world");
+        assert_eq!(
+            &hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
+    }
 }

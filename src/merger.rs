@@ -16,7 +16,7 @@ pub fn merge_databases(mut originals: impl Iterator<Item = Database>) -> Result<
 }
 
 fn merge(src: &mut Database, dst: &mut Database) -> Result<()> {
-    let mut s = State::new(src, dst);
+    let mut s = Merge::new(src, dst);
     s.merge_bookmarks()?;
     s.merge_user_marks()?;
     s.merge_notes()?;
@@ -27,16 +27,16 @@ fn merge(src: &mut Database, dst: &mut Database) -> Result<()> {
     Ok(())
 }
 
-struct State<'a> {
+struct Merge<'a> {
     src: &'a mut Database,
     dst: &'a mut Database,
     user_mark_translate: HashMap<u32, u32>,
     note_translate: HashMap<u32, u32>,
     tag_translate: HashMap<u32, u32>,
-    location: LocationState,
+    location: LocationMerge,
 }
 
-struct LocationState {
+struct LocationMerge {
     location_translate: HashMap<u32, u32>,
     src_location_index: HashMap<u32, Location>,
     dst_location_value_index: HashMap<LocationValue, u32>,
@@ -70,13 +70,13 @@ impl LocationValue {
     }
 }
 
-impl<'a> State<'a> {
+impl<'a> Merge<'a> {
     fn new(src: &'a mut Database, dst: &'a mut Database) -> Self {
-        State {
+        Merge {
             user_mark_translate: HashMap::new(),
             note_translate: HashMap::new(),
             tag_translate: HashMap::new(),
-            location: LocationState {
+            location: LocationMerge {
                 location_translate: HashMap::new(),
                 // TODO: Lazy initialization of indices
                 src_location_index: src
@@ -374,7 +374,7 @@ impl<'a> State<'a> {
     }
 }
 
-impl LocationState {
+impl LocationMerge {
     fn insert_location(&mut self, dst: &mut Vec<Location>, location_id: u32) -> u32 {
         if let Some(&translation) = self.location_translate.get(&location_id) {
             translation
@@ -495,7 +495,7 @@ mod test {
                 bookmarks: dst.iter().copied().map(with_slot).collect(),
                 ..Default::default()
             };
-            let mut state = State::new(&mut src, &mut dst);
+            let mut state = Merge::new(&mut src, &mut dst);
             state.merge_bookmarks()?;
             let mut vec: Vec<u32> = dst.bookmarks.iter().map(|b| b.slot).collect();
             vec.sort();

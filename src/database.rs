@@ -52,6 +52,7 @@ pub struct InputField {
 }
 
 #[derive(Debug, Clone)]
+/// Tag with ID 1 has type 0 and name "Favorite"
 pub struct Tag {
     pub tag_id: u32,
     pub r#type: u32,
@@ -153,6 +154,7 @@ impl Database {
         for sql in &self.schema_sql {
             conn.execute_batch(sql)?;
         }
+        conn.execute_batch("PRAGMA user_version=8")?;
         let s = Export {
             conn: &conn,
             database: self,
@@ -170,6 +172,7 @@ impl Database {
         s.tags()?;
         s.tag_maps()?;
         foreign_key_check(&conn)?;
+        mem_file[18..20].copy_from_slice(&[2, 2]);
         Ok(mem_file)
     }
 }

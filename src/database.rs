@@ -157,6 +157,7 @@ impl Database {
             conn: &conn,
             database: self,
         };
+        s.last_modified()?;
         s.locations()?;
         s.bookmarks()?;
         s.input_fields()?;
@@ -344,7 +345,16 @@ struct Export<'a> {
 }
 
 impl Export<'_> {
-    fn locations(&self) -> rusqlite::Result<()> {
+    fn last_modified(&self) -> Result<()> {
+        event!(Level::DEBUG, "write last modified");
+        self.conn.execute(
+            "INSERT INTO LastModified VALUES (?)",
+            params![&self.database.last_modified],
+        )?;
+        Ok(())
+    }
+
+    fn locations(&self) -> Result<()> {
         event!(Level::DEBUG, "write locations");
         let mut stmt = self
             .conn
@@ -366,7 +376,7 @@ impl Export<'_> {
         Ok(())
     }
 
-    fn notes(&self) -> rusqlite::Result<()> {
+    fn notes(&self) -> Result<()> {
         event!(Level::DEBUG, "write notes");
         let mut stmt = self
             .conn
@@ -387,7 +397,7 @@ impl Export<'_> {
         Ok(())
     }
 
-    fn user_marks(&self) -> rusqlite::Result<()> {
+    fn user_marks(&self) -> Result<()> {
         event!(Level::DEBUG, "write user_marks");
         let mut stmt = self
             .conn
@@ -405,7 +415,7 @@ impl Export<'_> {
         Ok(())
     }
 
-    fn tags(&self) -> rusqlite::Result<()> {
+    fn tags(&self) -> Result<()> {
         event!(Level::DEBUG, "write tags");
         let mut stmt = self.conn.prepare("INSERT INTO Tag VALUES (?,?,?,?)")?;
         for t in &self.database.tags {
@@ -414,7 +424,7 @@ impl Export<'_> {
         Ok(())
     }
 
-    fn tag_maps(&self) -> rusqlite::Result<()> {
+    fn tag_maps(&self) -> Result<()> {
         event!(Level::DEBUG, "write tag_maps");
         let mut stmt = self
             .conn
@@ -432,7 +442,7 @@ impl Export<'_> {
         Ok(())
     }
 
-    fn block_ranges(&self) -> rusqlite::Result<()> {
+    fn block_ranges(&self) -> Result<()> {
         event!(Level::DEBUG, "write block_ranges");
         let mut stmt = self
             .conn
@@ -450,7 +460,7 @@ impl Export<'_> {
         Ok(())
     }
 
-    fn bookmarks(&self) -> rusqlite::Result<()> {
+    fn bookmarks(&self) -> Result<()> {
         event!(Level::DEBUG, "write bookmarks");
         let mut stmt = self
             .conn
@@ -470,7 +480,7 @@ impl Export<'_> {
         Ok(())
     }
 
-    fn input_fields(&self) -> rusqlite::Result<()> {
+    fn input_fields(&self) -> Result<()> {
         event!(Level::DEBUG, "write input_fields");
         let mut stmt = self.conn.prepare("INSERT INTO InputField VALUES (?,?,?)")?;
         for i in &self.database.input_fields {

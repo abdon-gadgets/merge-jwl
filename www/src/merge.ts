@@ -8,8 +8,12 @@ function fromRustStr(ptr: number, len: number): string {
   return new TextDecoder("utf-8").decode(view);
 }
 
+// eslint-disable-next-line
 function fromRustString(vec: number): string {
-  const outputStr = fromRustStr(rustExports.vec_buffer(vec), rustExports.vec_len(vec));
+  const outputStr = fromRustStr(
+    rustExports.vec_buffer(vec),
+    rustExports.vec_len(vec)
+  );
   rustExports.vec_drop(vec);
   return outputStr;
 }
@@ -19,6 +23,7 @@ interface StreamWithSize {
   size: number;
 }
 
+// eslint-disable-next-line
 async function streamIntoVec(stream: StreamWithSize): Promise<number> {
   const reader = stream.stream.getReader();
   const vec = rustExports.vec_with_capacity(stream.size);
@@ -26,7 +31,7 @@ async function streamIntoVec(stream: StreamWithSize): Promise<number> {
   const vecBuffer = rustExports.vec_buffer(vec);
   try {
     let position = 0;
-    for(;;) {
+    for (;;) {
       const res = await reader.read();
       if (res.done) {
         break;
@@ -36,15 +41,17 @@ async function streamIntoVec(stream: StreamWithSize): Promise<number> {
           `Content-Length was lower ${position} + ${res.value.length} > ${capacity}`
         );
       }
-      const view = new Uint8Array(rustExports.memory.buffer, vecBuffer + position);
+      const view = new Uint8Array(
+        rustExports.memory.buffer,
+        vecBuffer + position
+      );
       view.set(res.value);
       position += res.value.length;
     }
     if (position != stream.size) {
-      console.warn("Content-Length was higher", capacity, position);
+      throw new Error('Content-Length was higher');
     }
     rustExports.vec_set_len(vec, position);
-    console.log("streamed to Vec ", position);
   } catch (e) {
     rustExports.vec_drop(vec);
     throw e;
@@ -53,6 +60,7 @@ async function streamIntoVec(stream: StreamWithSize): Promise<number> {
 }
 
 function consoleTrace(ptr: number, len: number) {
+  /* eslint-disable no-console */
   const event = JSON.parse(fromRustStr(ptr, len));
   const level = (() => {
     switch (event.level) {
@@ -72,6 +80,7 @@ function consoleTrace(ptr: number, len: number) {
   delete event.timestamp;
   delete event.level;
   level("%s", event.fields.message, event);
+  /* eslint-enable no-console */
 }
 
 interface RustrustExports {
@@ -88,27 +97,29 @@ interface RustrustExports {
 
 export async function startWasiTask() {
   // Instantiate a new WASI Instance
-const wasi = new WASI({
-  env: { RUST_BACKTRACE: "1" },
-  bindings: { ...wasiBindings },
-});
+  const wasi = new WASI({
+    env: { RUST_BACKTRACE: "1" },
+    bindings: { ...wasiBindings }
+  });
 
-const response = fetch("./merge-jwl.wasm");
-const module = await (typeof WebAssembly.compileStreaming === "function"
-  ? WebAssembly.compileStreaming(response)
-  : WebAssembly.compile(await (await response).arrayBuffer()));
-console.debug("WebAssembly compiled");
-const instance = await WebAssembly.instantiate(module, {
-  ...wasi.getImports(module),
-  env: {
-    "js_console_panic": (ptr: number, len: number) =>
-      console.error(fromRustStr(ptr, len)),
-    "js_console_trace": consoleTrace,
-  },
-});
-rustExports = instance.exports as unknown as RustrustExports;
+  const response = fetch("./merge-jwl.wasm");
+  const module = await (typeof WebAssembly.compileStreaming === "function"
+    ? WebAssembly.compileStreaming(response)
+    : WebAssembly.compile(await (await response).arrayBuffer()));
+  const instance = await WebAssembly.instantiate(module, {
+    ...wasi.getImports(module),
+    env: {
+      "js_console_panic": (ptr: number, len: number) =>
+        // eslint-disable-next-line no-console
+        console.error(fromRustStr(ptr, len)),
+      "js_console_trace": consoleTrace
+    }
+  });
+  rustExports = (instance.exports as unknown) as RustrustExports;
 
-// Start the WebAssembly WASI instance!
-wasi.start(instance);
-console.debug("check " + rustExports.return_one());
+  // Start the WebAssembly WASI instance!
+  wasi.start(instance);
+  if (rustExports.return_one() !== 1) {
+    throw new Error("WebAssembly failed to load");
+  }
 }

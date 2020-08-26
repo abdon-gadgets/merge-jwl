@@ -18,7 +18,7 @@ export default defineComponent({
     wasmHello: String,
   },
   async mounted() {
-    await startWasiTask;
+    await startWasiTask();
   }
 });
 </script>

@@ -6,6 +6,8 @@
 .pnp.*
 .pnp/
 
+public/*.wasm
+
 .DS_Store
 node_modules
 /dist

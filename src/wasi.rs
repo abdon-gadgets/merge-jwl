@@ -27,6 +27,11 @@ extern "C" {
 }
 
 #[no_mangle]
+pub extern "C" fn return_one() -> i32 {
+    1
+}
+
+#[no_mangle]
 pub extern "C" fn vec_with_capacity(cap: usize) -> Box<Vec<u8>> {
     Box::new(Vec::with_capacity(cap))
 }

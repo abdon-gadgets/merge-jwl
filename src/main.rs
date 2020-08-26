@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     if args.len() < 2 {
         return Err(anyhow!("Provide at least 2 input files"));
     }
-    let input_files = args[..args.len() - 1]
+    let input_files = args
         .iter()
         .map(|p| File::open(p).context("Couldn't open input file"))
         .collect::<Result<Vec<File>>>()?;

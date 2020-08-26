@@ -207,9 +207,31 @@ impl<'a> Merge<'a> {
                 let dst_time = DateTime::parse_from_rfc3339(&dst.last_modified)?;
                 if dst_time < src_time {
                     // note already exists in destination, but it's older
+                    // TODO: Show the diff to the user
+                    event!(
+                        Level::INFO,
+                        "Update note\n{} ({})\n{}\n{} ({})\n{}",
+                        dst.title.as_ref().map_or("", String::as_str),
+                        &dst.last_modified,
+                        dst.content.as_ref().map_or("", String::as_str),
+                        src.title.as_ref().map_or("", String::as_str),
+                        &src.last_modified,
+                        src.content.as_ref().map_or("", String::as_str)
+                    );
                     dst.title = src.title.clone();
                     dst.content = src.content.clone();
                     dst.last_modified = src.last_modified.clone();
+                } else {
+                    event!(
+                        Level::INFO,
+                        "Ignore outdated note\n{} ({})\n{}\n{} ({})\n{}",
+                        dst.title.as_ref().map_or("", String::as_str),
+                        &dst.last_modified,
+                        dst.content.as_ref().map_or("", String::as_str),
+                        src.title.as_ref().map_or("", String::as_str),
+                        &src.last_modified,
+                        src.content.as_ref().map_or("", String::as_str)
+                    );
                 }
                 self.note_translate.insert(src.note_id, dst.note_id);
             } else {

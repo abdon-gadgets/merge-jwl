@@ -63,10 +63,7 @@ pub unsafe extern "C" fn jwl_merge(
     inputs: Box<Vec<Vec<u8>>>,
     date_now: Box<Vec<u8>>,
 ) -> Option<Box<MergeResult>> {
-    match merge(
-        inputs.into_iter().map(Cursor::new).collect(),
-        String::from_utf8_unchecked(*date_now),
-    ) {
+    match merge(*inputs, String::from_utf8_unchecked(*date_now)) {
         Ok(output) => Some(Box::new(output)),
         Err(e) => {
             event!(Level::ERROR, ?e, "Merge failed");
@@ -75,12 +72,12 @@ pub unsafe extern "C" fn jwl_merge(
     }
 }
 
-fn merge(inputs: Vec<Cursor<Vec<u8>>>, date_now: String) -> Result<MergeResult> {
+fn merge(inputs: Vec<Vec<u8>>, date_now: String) -> Result<MergeResult> {
+    let max_size: usize = inputs.iter().map(|i| i.len()).sum();
+    let inputs = inputs.into_iter().map(Cursor::new).collect();
     let (manifests, mem_file) = crate::run(inputs)?;
     let manifest = crate::update_manifest(&manifests, &mem_file, date_now);
-    // TODO: Hand over manifest JSON
-    // TODO: Estimate vector capacity
-    let mut output_file = Cursor::new(Vec::new());
+    let mut output_file = Cursor::new(Vec::with_capacity(max_size / 3 * 2));
     crate::compress(&manifest, mem_file, &mut output_file)?;
     Ok(MergeResult {
         file: output_file.into_inner(),

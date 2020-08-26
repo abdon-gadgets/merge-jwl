@@ -3,19 +3,35 @@ import wasiBindings from "@wasmer/wasi/lib/bindings/browser";
 
 let rustExports: RustrustExports;
 
+const vecSize = 3 * 32 / 8;
+
 function fromRustStr(ptr: number, len: number): string {
   const view = new Uint8Array(rustExports.memory.buffer, ptr, len);
   return new TextDecoder("utf-8").decode(view);
 }
 
-// eslint-disable-next-line
-function fromRustString(vec: number): string {
-  const outputStr = fromRustStr(
-    rustExports.vec_buffer(vec),
-    rustExports.vec_len(vec)
+// function fromRustString(vec: number): string {
+//   const outputStr = fromRustStr(
+//     rustExports.vec_buffer(vec),
+//     rustExports.vec_len(vec)
+//   );
+//   rustExports.vec_u8_drop(vec);
+//   return outputStr;
+// }
+
+function toRustString(str: string) {
+  const array = new TextEncoder().encode(str);
+  const len = array.length;
+  const vec = rustExports.vec_u8_with_capacity(len)
+  const buf = rustExports.vec_buffer(vec)
+  const view = new Uint8Array(
+    rustExports.memory.buffer,
+    buf,
+    len
   );
-  rustExports.vec_drop(vec);
-  return outputStr;
+  view.set(array);
+  rustExports.vec_set_len(vec, len);
+  return vec;
 }
 
 interface StreamWithSize {
@@ -23,10 +39,13 @@ interface StreamWithSize {
   size: number;
 }
 
-// eslint-disable-next-line
+function uploadFile(file: File): StreamWithSize {
+  return { stream: file.stream(), size: file.size };
+}
+
 async function streamIntoVec(stream: StreamWithSize): Promise<number> {
   const reader = stream.stream.getReader();
-  const vec = rustExports.vec_with_capacity(stream.size);
+  const vec = rustExports.vec_u8_with_capacity(stream.size);
   const capacity = rustExports.vec_capacity(vec);
   const vecBuffer = rustExports.vec_buffer(vec);
   try {
@@ -53,7 +72,7 @@ async function streamIntoVec(stream: StreamWithSize): Promise<number> {
     }
     rustExports.vec_set_len(vec, position);
   } catch (e) {
-    rustExports.vec_drop(vec);
+    rustExports.vec_u8_drop(vec);
     throw e;
   }
   return vec;
@@ -86,13 +105,15 @@ function consoleTrace(ptr: number, len: number) {
 interface RustrustExports {
   readonly memory: WebAssembly.Memory;
   "return_one"(): number;
-  "vec_with_capacity"(cap: number): number;
+  "vec_u8_with_capacity"(cap: number): number;
+  "vec_vec_with_capacity"(cap: number): number;
   "vec_capacity"(vec: number): number;
   "vec_len"(vec: number): number;
   "vec_buffer"(vec: number): number;
   "vec_set_len"(vec: number, newLen: number): void;
-  "vec_drop"(vec: number): void;
-  "jwl_merge"(inputs: number, dateNow: number): void;
+  "vec_u8_drop"(vec: number): void;
+  "jwl_merge"(inputs: number, dateNow: number): number;
+  "merge_result_drop"(mergeResult: number): void;
 }
 
 export async function startWasiTask() {
@@ -122,4 +143,30 @@ export async function startWasiTask() {
   if (rustExports.return_one() !== 1) {
     throw new Error("WebAssembly failed to load");
   }
+}
+
+export async function mergeUploads(files: FileList) {
+  const len = files.length;
+  if (len < 2) {
+    throw new Error("Merge 2 or more files");
+  }
+  const intputVecs = await Promise.all(Array.from(files).map(f => streamIntoVec(uploadFile(f))));
+  const inputsPtr = rustExports.vec_vec_with_capacity(len);
+  const inputsBuf = rustExports.vec_buffer(inputsPtr);
+  new Uint32Array(
+    rustExports.memory.buffer,
+    inputsBuf,
+    len
+  ).set(intputVecs);
+  rustExports.vec_set_len(inputsPtr, len);
+  const filePtr = rustExports.jwl_merge(inputsPtr, toRustString(new Date().toISOString().substr(0,10)));
+  if (filePtr == 0) {
+    throw new Error("Merge failed");
+  }
+  const manifestPtr = filePtr + vecSize;
+  const manifestBuf = rustExports.vec_buffer(manifestPtr);
+  const manifestLen = rustExports.vec_len(manifestPtr);
+  const manifest = JSON.parse(fromRustStr(manifestBuf, manifestLen));
+  console.debug(manifest);
+  rustExports.merge_result_drop(filePtr);
 }

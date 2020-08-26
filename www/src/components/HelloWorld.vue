@@ -4,21 +4,39 @@
     <p>
       {{ wasmHello }}
     </p>
+    <label>
+        JW Library backup files
+        <input type="file" required multiple accept=".jwlibrary" v-on:change="fileInputChange">
+    </label>
   </div>
 </template>
 
 <script lang="ts">
 import { defineComponent } from 'vue';
-import { startWasiTask } from '../merge';
+import { startWasiTask, mergeUploads } from '../merge';
 
 export default defineComponent({
   name: 'HelloWorld',
   props: {
     msg: String,
-    wasmHello: String,
+  },
+  data() {
+    return {
+      wasmHello: "",
+      // upload: null as FileList | null,
+    }
+  },
+  methods: {
+    fileInputChange: async function(e: Event) {
+      const files = (e.target as HTMLInputElement).files;
+      if (files && files.length > 1) {
+        await mergeUploads(files);
+      }
+    },
   },
   async mounted() {
     await startWasiTask();
+    this.wasmHello = "WebAssembly loaded";
   }
 });
 </script>

@@ -50,11 +50,11 @@ fn main() {
     wasi::main();
 }
 
-pub fn run(input_files: Vec<impl io::Read + io::Seek + std::fmt::Debug>) -> Result<BackupVec> {
+pub fn run(input_files: Vec<impl io::Read + io::Seek>) -> Result<BackupVec> {
     let mut databases = Vec::with_capacity(input_files.len());
     let mut manifests = Vec::with_capacity(input_files.len());
     for input in input_files {
-        event!(Level::INFO, "Loading {:?}", &input);
+        event!(Level::INFO, "Loading");
         let mut backup = load(input)?;
         let name = &backup.manifest.name;
         event!(Level::INFO, "Backup name {}, cleaning", name);

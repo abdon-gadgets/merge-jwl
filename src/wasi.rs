@@ -15,6 +15,7 @@ pub fn main() {
         }
     }));
     tracing_subscriber::FmtSubscriber::builder()
+        .with_max_level(Level::TRACE)
         .with_writer(|| DebugWriter)
         .without_time()
         .json()
@@ -32,7 +33,12 @@ pub extern "C" fn return_one() -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn vec_with_capacity(cap: usize) -> Box<Vec<u8>> {
+pub extern "C" fn vec_u8_with_capacity(cap: usize) -> Box<Vec<u8>> {
+    Box::new(Vec::with_capacity(cap))
+}
+
+#[no_mangle]
+pub extern "C" fn vec_vec_with_capacity(cap: usize) -> Box<Vec<Box<Vec<u8>>>> {
     Box::new(Vec::with_capacity(cap))
 }
 
@@ -59,16 +65,17 @@ pub unsafe extern "C" fn vec_set_len(vec: &mut Vec<u8>, index: usize) {
 }
 
 #[no_mangle]
-pub extern "C" fn vec_drop(_vec: Box<Vec<u8>>) {}
+pub extern "C" fn vec_u8_drop(_vec: Box<Vec<u8>>) {}
 
 /// # Safety
 /// `date_now` must point to a UTF-8 encoded string.
 #[no_mangle]
 pub unsafe extern "C" fn jwl_merge(
-    inputs: Box<Vec<Vec<u8>>>,
+    inputs: Box<Vec<Box<Vec<u8>>>>,
     date_now: Box<Vec<u8>>,
 ) -> Option<Box<MergeResult>> {
-    match merge(*inputs, String::from_utf8_unchecked(*date_now)) {
+    let inputs = inputs.into_iter().map(|v| *v).collect();
+    match merge(inputs, String::from_utf8_unchecked(*date_now)) {
         Ok(output) => Some(Box::new(output)),
         Err(e) => {
             event!(Level::ERROR, ?e, "Merge failed");
@@ -76,6 +83,9 @@ pub unsafe extern "C" fn jwl_merge(
         }
     }
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn merge_result_drop(_: Option<Box<MergeResult>>) {}
 
 fn merge(inputs: Vec<Vec<u8>>, date_now: String) -> Result<MergeResult> {
     let max_size: usize = inputs.iter().map(|i| i.len()).sum();
@@ -105,5 +115,15 @@ impl io::Write for DebugWriter {
     }
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::mem::size_of;
+
+    #[test]
+    fn test_layout_vec() {
+        assert_eq!(size_of::<Vec<u8>>(), 3 * 32 / 8)
     }
 }

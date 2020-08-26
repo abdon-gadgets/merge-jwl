@@ -9,22 +9,37 @@ use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{event, Level};
 
-use std::fs::File;
 use std::io::{self, Write};
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<()> {
+    use std::fs::{File, OpenOptions};
     tracing_subscriber::fmt::init();
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.len() < 3 {
-        return Err(anyhow!("Provide at least 2 input files and 1 output file"));
+    if args.len() < 2 {
+        return Err(anyhow!("Provide at least 2 input files"));
     }
     let input_files = args[..args.len() - 1]
         .iter()
         .map(|p| File::open(p).context("Couldn't open input file"))
         .collect::<Result<Vec<File>>>()?;
-    let mut output_file =
-        File::create(args.last().unwrap()).context("Couldn't open output file")?;
 
+    let (manifest, mem_file) = run(input_files)?;
+    let mut path = std::path::PathBuf::from(".");
+    path.set_file_name(&manifest.name);
+    path.set_extension("jwlibrary");
+    let mut output_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .context("Couldn't open output file")?;
+    compress(manifest, mem_file, &mut output_file)?;
+
+    event!(Level::INFO, "Finished");
+    Ok(())
+}
+
+fn run(input_files: Vec<impl io::Read + io::Seek + std::fmt::Debug>) -> Result<BackupVec> {
     let mut databases = Vec::with_capacity(input_files.len());
     let mut manifests = Vec::with_capacity(input_files.len());
     for input in input_files {
@@ -43,16 +58,15 @@ fn main() -> Result<()> {
         manifests.push(backup.manifest);
     }
 
-    let merged = merge_databases(databases.into_iter())?;
-    let mem_file = merged.serialize()?;
+    let database = merge_databases(databases.into_iter())?;
+    let mem_file = database.serialize()?;
     let manifest = update_manifest(&manifests, compute_hash(&mem_file));
-    compress(manifest, mem_file, &mut output_file)?;
-
-    event!(Level::INFO, "Merge");
-    Ok(())
+    Ok((manifest, mem_file))
 }
 
-struct BackupFile {
+type BackupVec = (Manifest, Vec<u8>);
+
+struct Backup {
     manifest: Manifest,
     database: Database,
 }
@@ -80,7 +94,7 @@ struct UserDataBackup {
 const MANIFEST_ENTRY_NAME: &str = "manifest.json";
 const DATABASE_ENTRY_NAME: &str = "userData.db";
 
-fn load(file: impl io::Read + io::Seek) -> Result<BackupFile> {
+fn load(file: impl io::Read + io::Seek) -> Result<Backup> {
     let mut zip = zip::ZipArchive::new(file).context("Unzip .jwlibrary")?;
     let manifest_entry = zip
         .by_name(MANIFEST_ENTRY_NAME)
@@ -104,12 +118,12 @@ fn load(file: impl io::Read + io::Seek) -> Result<BackupFile> {
     let mut mem_file = Vec::with_capacity(database_entry.size() as _);
     io::copy(&mut database_entry, &mut mem_file).context("Read database to memory")?;
     ensure!(
-        &compute_hash(&mem_file) == &manifest.user_data_backup.hash,
+        compute_hash(&mem_file) == manifest.user_data_backup.hash,
         "Hash mismatch"
     );
 
     let database = Database::read(mem_file)?;
-    Ok(BackupFile { manifest, database })
+    Ok(Backup { manifest, database })
 }
 
 fn compute_hash(file: &[u8]) -> String {
@@ -119,17 +133,18 @@ fn compute_hash(file: &[u8]) -> String {
 }
 
 fn update_manifest(originals: &[Manifest], hash: String) -> Manifest {
-    let date = "2020-08-26";
+    let date = now();
     // pick the first manifest as the basis for the manifest in the final merged file
     let base = &originals[0];
-    let device_name: Vec<&String> = originals
+    let mut device_name: Vec<&str> = originals
         .iter()
-        .map(|d| &d.user_data_backup.device_name)
+        .map(|d| d.user_data_backup.device_name.as_str())
         .collect();
-    let device_name = serde_json::to_string(&device_name).unwrap();
+    device_name.dedup();
+    let device_name = format!("{} (merge-jwl)", device_name.join("🔁"));
     Manifest {
-        name: format!("merged_{}", date),
-        creation_date: date.to_string(),
+        name: format!("UserDataBackup_{}_Merge", &date),
+        creation_date: date,
         user_data_backup: UserDataBackup {
             last_modified_date: base.user_data_backup.last_modified_date.to_string(),
             device_name,
@@ -159,6 +174,13 @@ fn compress(
     zip.write_all(&database)?;
     zip.finish()?;
     Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now() -> String {
+    chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
+        .format("%F")
+        .to_string()
 }
 
 #[cfg(test)]

@@ -30,7 +30,7 @@ fn main() -> Result<()> {
     path.set_extension("jwlibrary");
     let mut output_file = OpenOptions::new()
         .write(true)
-        .create_new(true)
+        .create(true)
         .open(path)
         .context("Couldn't open output file")?;
     compress(manifest, mem_file, &mut output_file)?;

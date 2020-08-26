@@ -17,6 +17,7 @@ pub fn merge_databases(mut originals: impl Iterator<Item = Database>) -> Result<
 
 fn merge(src: &mut Database, dst: &mut Database) -> Result<()> {
     let mut s = Merge::new(src, dst);
+    // TODO: First merge all locations
     s.merge_bookmarks()?;
     s.merge_user_marks()?;
     s.merge_notes()?;

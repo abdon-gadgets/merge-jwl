@@ -19,86 +19,153 @@ pub struct Database {
 
 #[derive(Debug, Clone)]
 pub struct Location {
+    /// Primary key and rowid.
     pub location_id: u32,
+    /// The Bible book number (or null if not Bible).
     pub book_number: Option<u32>,
+    /// The Bible chapter number (or null if not Bible).
     pub chapter_number: Option<u32>,
+    /// MEPS Document ID.
     pub document_id: Option<u32>,
+    /// The track. TODO: Semantics unknown.
     pub track: Option<u32>,
+    /// A reference to the publication issue (or 0 if not applicable), e.g. "20171100".
     pub issue_tag_number: u32,
+    /// Publication key symbol, or empty string.
     pub key_symbol: Option<Rc<String>>,
+    /// MEPS language.
     pub meps_language: u32,
+    /// - 0: Standard location entry
+    /// - 1: Reference to publication (see Bookmark.PublicationLocationId)
+    /// - 2: Unknown
+    /// - 3: Unknown
     pub r#type: u32,
+    /// Title, like 'Luke 17' or 'Record Your Progress'.
     pub title: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Note {
+    /// Primary key and rowid.
     pub note_id: u32,
+    /// A GUID.
     pub guid: String,
+    /// UserMark reference if the note is associated with user-highlighting.
     pub user_mark_id: Option<u32>,
+    /// Location reference.
     pub location_id: Option<u32>,
+    /// User-defined note title.
     pub title: Option<String>,
+    /// User-defined note content.
     pub content: Option<String>,
+    /// Time stamp when the note was last edited, ISO 8601 format.
     pub last_modified: String,
+    /// The type of block associated with the note.
+    /// Types:
+    /// - 0: The note is associated with the document rather than a block of text within it.
+    /// - 1: The note is associated with a paragraph in a publication.
+    /// - 2: The note is associated with a verse in the Bible.
+    /// See also UserMarkId which may better define the associated block of text.
     pub block_type: u32,
+    /// Helps to locate the block of text associated with the note.
     pub block_identifier: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct InputField {
+    /// Primary key and rowid.
     pub location_id: u32,
+    /// Unknown.
     pub text_tag: String,
+    /// Unknown.
     pub value: String,
 }
 
-#[derive(Debug, Clone)]
 /// Tag with ID 1 has type 0 and name "Favorite"
+#[derive(Debug, Clone)]
 pub struct Tag {
+    /// Primary key and rowid.
     pub tag_id: u32,
+    /// Tag type (0 = Favourite, 1 = User-defined, 2 = Unknown).
     pub r#type: u32,
+    /// User-defined tag name.
     pub name: String,
+    /// Image (added in db version 7 April 2020).
     pub image_filename: Option<String>,
 }
 
+/// Many-to-many junction table for tags.
+/// Columns PlaylistItemId, LocationId and NoteId are mutually exclusive.
+/// Schema changed in version 7.
 #[derive(Debug, Clone)]
 pub struct TagMap {
+    /// Primary key and rowid.
     pub tag_map_id: u32,
+    /// Playlist reference.
     pub playlist_item_id: Option<u32>,
+    /// Location reference.
     pub location_id: Option<u32>,
+    /// Note reference.
     pub note_id: Option<u32>,
+    /// Tag reference.
     pub tag_id: u32,
+    /// The zero-based position of the tag map entry among all entries having the same TagId.
+    /// Tagged items can be ordered in the JWL application.
     pub position: u32,
 }
 
 #[derive(Debug, Clone)]
 pub struct BlockRange {
+    /// Primary key and rowid.
     pub block_range_id: u32,
+    /// Block type (1: Publication, 2: Bible)
     pub block_type: u32,
+    /// Paragraph or verse ID, one based.
     pub identifier: u32,
+    /// Zero-based word in a sentence that marks the start of the highlight.
     pub start_token: Option<u32>,
+    /// Zero-based word in a sentence that marks the end of the highlight (inclusive).
     pub end_token: Option<u32>,
+    /// UserMark reference.
     pub user_mark_id: u32,
 }
 
 #[derive(Debug, Clone)]
 pub struct Bookmark {
+    /// Primary key and rowid.
     pub bookmark_id: u32,
+    /// Location reference.
     pub location_id: u32,
+    /// Publication reference, Location.Type = 1.
     pub publication_location_id: u32,
+    /// Zero-based order of bookmarks (one of 10 slots with different colors).
     pub slot: u32,
+    /// Title.
     pub title: String,
+    /// Snippet of bookmarked text.
     pub snippet: Option<String>,
+    /// Block type:
+    /// - 0: Bible chapter?
+    /// - 1: Publication paragraph
+    /// - 2: Bible verse
     pub block_type: u32,
+    /// One-based paragraph or verse identifier.
     pub block_identifier: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct UserMark {
+    /// Primary key and rowid.
     pub user_mark_id: u32,
+    /// The index of the marking (highlight) color.
     pub color_index: u32,
+    /// Location reference.
     pub location_id: u32,
+    /// Unknown (always 0?).
     pub style_index: u32,
+    /// A GUID.
     pub user_mark_guid: String,
+    /// Unknown (observed 0 and 1).
     pub version: u32,
 }
 
@@ -126,6 +193,8 @@ impl Database {
         let journal_mode: String =
             conn.query_row("PRAGMA journal_mode", NO_PARAMS, |r| r.get(0))?;
         ensure!(&journal_mode == "memory", "journal_mode {}", &journal_mode);
+        let user_version: i64 = conn.query_row("PRAGMA user_version", NO_PARAMS, |r| r.get(0))?;
+        ensure!(user_version == 8, "user_version {}", user_version);
 
         // Replaces FixupAnomalies
         foreign_key_check(&conn)?;

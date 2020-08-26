@@ -1,6 +1,8 @@
 mod cleaner;
 mod database;
 mod merger;
+#[cfg(target_arch = "wasm32")]
+mod wasi;
 
 use crate::cleaner::clean;
 use crate::database::Database;
@@ -24,7 +26,11 @@ fn main() -> Result<()> {
         .map(|p| File::open(p).context("Couldn't open input file"))
         .collect::<Result<Vec<File>>>()?;
 
-    let (manifest, mem_file) = run(input_files)?;
+    let (manifests, mem_file) = run(input_files)?;
+    let now = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
+        .format("%F")
+        .to_string();
+    let manifest = update_manifest(&manifests, &mem_file, now);
     let mut path = std::path::PathBuf::from(".");
     path.set_file_name(&manifest.name);
     path.set_extension("jwlibrary");
@@ -33,13 +39,18 @@ fn main() -> Result<()> {
         .create(true)
         .open(path)
         .context("Couldn't open output file")?;
-    compress(manifest, mem_file, &mut output_file)?;
+    compress(&manifest, mem_file, &mut output_file)?;
 
     event!(Level::INFO, "Finished");
     Ok(())
 }
 
-fn run(input_files: Vec<impl io::Read + io::Seek + std::fmt::Debug>) -> Result<BackupVec> {
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    wasi::main();
+}
+
+pub fn run(input_files: Vec<impl io::Read + io::Seek + std::fmt::Debug>) -> Result<BackupVec> {
     let mut databases = Vec::with_capacity(input_files.len());
     let mut manifests = Vec::with_capacity(input_files.len());
     for input in input_files {
@@ -60,11 +71,10 @@ fn run(input_files: Vec<impl io::Read + io::Seek + std::fmt::Debug>) -> Result<B
 
     let database = merge_databases(databases.into_iter())?;
     let mem_file = database.serialize()?;
-    let manifest = update_manifest(&manifests, compute_hash(&mem_file));
-    Ok((manifest, mem_file))
+    Ok((manifests, mem_file))
 }
 
-type BackupVec = (Manifest, Vec<u8>);
+pub type BackupVec = (Vec<Manifest>, Vec<u8>);
 
 struct Backup {
     manifest: Manifest,
@@ -73,7 +83,7 @@ struct Backup {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-struct Manifest {
+pub struct Manifest {
     name: String,
     creation_date: String,
     version: i32,
@@ -125,8 +135,8 @@ fn compute_hash(file: &[u8]) -> String {
     format!("{:x}", hash)
 }
 
-fn update_manifest(originals: &[Manifest], hash: String) -> Manifest {
-    let date = now();
+pub fn update_manifest(originals: &[Manifest], mem_file: &[u8], date: String) -> Manifest {
+    let hash = compute_hash(mem_file);
     // pick the first manifest as the basis for the manifest in the final merged file
     let base = &originals[0];
     let mut device_name: Vec<&str> = originals
@@ -150,8 +160,8 @@ fn update_manifest(originals: &[Manifest], hash: String) -> Manifest {
     }
 }
 
-fn compress(
-    manifest: Manifest,
+pub fn compress(
+    manifest: &Manifest,
     database: Vec<u8>,
     file: &mut (impl io::Write + io::Seek),
 ) -> Result<()> {
@@ -161,19 +171,12 @@ fn compress(
         .compression_method(zip::CompressionMethod::Deflated);
     zip.set_comment("");
     zip.start_file(MANIFEST_ENTRY_NAME, options)?;
-    serde_json::to_writer(&mut zip, &manifest)?;
+    serde_json::to_writer(&mut zip, manifest)?;
 
     zip.start_file(&manifest.user_data_backup.database_name, options)?;
     zip.write_all(&database)?;
     zip.finish()?;
     Ok(())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn now() -> String {
-    chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
-        .format("%F")
-        .to_string()
 }
 
 #[cfg(test)]

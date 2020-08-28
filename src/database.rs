@@ -219,7 +219,11 @@ impl Database {
         let mut mem_file = Vec::new(); // TODO: Guess size
         let conn = Connection::open_in_memory()?.into_borrowing();
         conn.deserialize_writable(DatabaseName::Main, &mut mem_file)?;
-        conn.execute_batch("PRAGMA foreign_keys=0")?;
+        // conn.execute_batch("PRAGMA foreign_keys=0")?;
+        let journal_mode: String =
+            conn.query_row("PRAGMA journal_mode=off", NO_PARAMS, |r| r.get(0))?;
+        ensure!(&journal_mode == "off", "journal_mode {}", &journal_mode);
+        conn.execute_batch("BEGIN TRANSACTION")?; // 3x faster
         for sql in &self.schema_sql {
             conn.execute_batch(sql)?;
         }
@@ -240,7 +244,8 @@ impl Database {
         // playlist_item_child
         s.tags()?;
         s.tag_maps()?;
-        foreign_key_check(&conn)?;
+        conn.execute_batch("END TRANSACTION")?;
+        // foreign_key_check(&conn)?;
         mem_file[18..20].copy_from_slice(&[2, 2]);
         Ok(mem_file)
     }

@@ -257,6 +257,9 @@ impl<'a> Merge<'a> {
             .collect::<Result<HashMap<_, _>>>()?;
         for mut src in self.src.notes.drain(..) {
             if let Some(dst) = guid_map.get_mut(&parse_guid(&src.guid)?) {
+                if src.last_modified == dst.last_modified {
+                    continue;
+                }
                 let src_time = DateTime::parse_from_rfc3339(&src.last_modified)?;
                 let dst_time = DateTime::parse_from_rfc3339(&dst.last_modified)?;
                 let (before, after) = if dst_time < src_time {

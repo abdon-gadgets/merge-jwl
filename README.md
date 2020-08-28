@@ -29,5 +29,5 @@ export CC_wasm32_wasi="/opt/wasi-sdk/bin/clang"
 export CARGO_TARGET_WASM32_WASI_LINKER="/opt/wasi-sdk/bin/clang"
 export WASM_OPT=/usr/bin/wasm-opt
 RUSTFLAGS="-C target-feature=-crt-static" cargo wasi build --release
-cp target/wasm32-wasi/release/merge-jwl.wasm www/src/assets/
+cp target/wasm32-wasi/release/merge-jwl.wasm www/public/
 ```

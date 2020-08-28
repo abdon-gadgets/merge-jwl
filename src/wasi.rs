@@ -83,7 +83,12 @@ pub unsafe extern "C" fn jwl_merge(
             },
             Err(e) => JsMerge {
                 file: None,
-                result: serde_json::to_vec(&[Message::Error(format!("{:?}", e))]).unwrap(),
+                result: serde_json::to_vec(&Json {
+                    messages: vec![Message::Error(format!("{:?}", e))],
+                    input_manifests: vec![],
+                    result_manifest: None,
+                })
+                .unwrap(),
             },
         },
     )
@@ -96,13 +101,14 @@ fn merge(inputs: Vec<Vec<u8>>, date_now: String) -> Result<(Vec<u8>, Json)> {
     let max_size: usize = inputs.iter().map(|i| i.len()).sum();
     let inputs = inputs.into_iter().map(Cursor::new).collect();
     let merge = crate::run(inputs, |p| unsafe { js_merge_progress(p) })?;
-    let manifest = crate::update_manifest(&merge, date_now);
+    let result_manifest = crate::update_manifest(&merge, date_now);
     let mut output_file = Cursor::new(Vec::with_capacity(max_size / 3 * 2));
-    crate::compress(&manifest, merge.mem_file, &mut output_file)?;
+    crate::compress(&result_manifest, merge.mem_file, &mut output_file)?;
     Ok((
         output_file.into_inner(),
         Json {
-            manifest,
+            input_manifests: merge.manifests,
+            result_manifest: Some(result_manifest),
             messages: merge.messages,
         },
     ))
@@ -115,8 +121,10 @@ pub struct JsMerge {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Json {
-    manifest: Manifest,
+    input_manifests: Vec<Manifest>,
+    result_manifest: Option<Manifest>,
     messages: Vec<Message>,
 }
 

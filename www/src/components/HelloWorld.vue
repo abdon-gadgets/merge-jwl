@@ -1,44 +1,156 @@
 <template>
   <div class="hello">
     <h1>{{ msg }}</h1>
-    <p>
-      {{ wasmHello }}
-    </p>
     <label>
-        JW Library backup files
-        <input type="file" required multiple accept=".jwlibrary" v-on:change="fileInputChange">
+      JW Library backup files
+      <input
+        type="file"
+        required
+        multiple
+        accept=".jwlibrary"
+        @change="fileInputChange"
+      />
     </label>
+    <p>{{ progress }}</p>
+    <div>
+      <!-- Errors -->
+      <h3 v-if="errors[0]">Errors</h3>
+      <ul>
+        <li v-for="error in errors" :key="error">
+          <ul class="message-error">
+            <li v-for="line in error" :key="line">{{ line }}</li>
+          </ul>
+        </li>
+      </ul>
+      <!-- BookmarkOverflow -->
+      <h3 v-if="bookmarks[0]">Discarded bookmarks (all 10 slots occupied)</h3>
+      <ul>
+        <li v-for="bookmark in bookmarks" :key="bookmark">
+          <p>{{ bookmark.title }}</p>
+          <small>{{ bookmark.snippet }}</small>
+          <i>{{ bookmarkText(bookmark) }}</i>
+        </li>
+      </ul>
+      <!-- NoteUpdate -->
+      <h3 v-if="notes[0]">Notes that are updated</h3>
+      <ul>
+        <li v-for="note in notes" :key="note">
+          <div v-for="text in [note.before, note.after]" :key="text">
+            <p>{{ text.title }}</p>
+            <small>{{ text.content }}</small>
+            <i>{{ new Date(text.date).toLocalString() }}</i>
+          </div>
+        </li>
+      </ul>
+      <button v-if="merge && merge.file" @click="download">Download merged</button>
+    </div>
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent } from 'vue';
-import { startWasiTask, mergeUploads } from '../merge';
+import { defineComponent } from "vue";
+import {
+  startWasi,
+  mergeUploads,
+  Progress,
+  Merge,
+  BookmarkOverflow,
+  MessageJson,
+  Note,
+} from "../merge";
+
+function updateProgress(progress: Progress) {
+  switch (progress) {
+    case Progress.Load:
+      return "Load";
+    case Progress.Wasm:
+      return "WASM";
+    case Progress.Extract:
+      return "Extract";
+    case Progress.Merge:
+      return "Merge";
+    case Progress.Store:
+      return "Store";
+    case Progress.Pack:
+      return "Pack";
+    case Progress.Js:
+      return "Finalize";
+    default:
+      return "Done";
+  }
+}
+
+function mapMessage<T extends string | object>(
+  merge: Merge | null,
+  f: (m: MessageJson) => T | undefined
+): T[] {
+  return merge
+    ? (merge.messages
+        .map((m) => f(m))
+        .filter((m) => typeof m !== "undefined") as T[])
+    : [];
+}
+
+interface Data {
+  progress: string;
+  merge: Merge | null;
+}
 
 export default defineComponent({
-  name: 'HelloWorld',
+  name: "HelloWorld",
   props: {
     msg: String,
   },
   data() {
     return {
-      wasmHello: "",
-      // upload: null as FileList | null,
-    }
+      progress: "",
+      merge: null,
+    } as Data;
   },
-  methods: {
-    fileInputChange: async function(e: Event) {
-      const files = (e.target as HTMLInputElement).files;
-      if (files && files.length > 1) {
-        const manifest = await mergeUploads(files);
-        this.wasmHello = manifest.name;
-      }
+  computed: {
+    bookmarks(): BookmarkOverflow[] {
+      return mapMessage(this.merge, (m) => m.bookmarkOverflow);
+    },
+    errors(): string[][] {
+      return mapMessage(this.merge, (m) => m.error).map((e) =>
+        e.split("\n").filter((m) => m.trim().length)
+      );
+    },
+    notes(): Note[] {
+      return mapMessage(this.merge, (m) => m.noteUpdate);
     },
   },
-  async mounted() {
-    await startWasiTask();
-    this.wasmHello = "WebAssembly loaded";
-  }
+  methods: {
+    fileInputChange: async function (e: Event) {
+      // TODO: Wait for WASI
+      const files = (e.target as HTMLInputElement).files;
+      if (files && files.length > 1) {
+        try {
+          this.merge = await mergeUploads(
+            files,
+            (p) => (this.progress = updateProgress(p))
+          );
+        } catch (e) {
+          this.progress = e.toString();
+        }
+      }
+    },
+    download: function () {
+      if (this.merge) {
+        this.merge.download();
+      }
+    },
+    bookmarkText: function (bookmark: BookmarkOverflow) {
+      const issue = bookmark.issueTagNumber;
+      if (issue > 1950_00 && issue < 2050_00) {
+        return `${bookmark.keySymbol}.${issue % 100}`;
+      }
+      return bookmark.keySymbol;
+    },
+  },
+  mounted() {
+    startWasi();
+  },
 });
 </script>
 
@@ -47,15 +159,15 @@ export default defineComponent({
 h3 {
   margin: 40px 0 0;
 }
-ul {
-  list-style-type: none;
-  padding: 0;
-}
-li {
-  display: inline-block;
-  margin: 0 10px;
-}
 a {
   color: #42b983;
+}
+
+.message-error {
+  background-color: #ffddcc;
+
+  > li:first-child {
+    font-weight: bold;
+  }
 }
 </style>

@@ -1,10 +1,11 @@
 import { WASI } from "@wasmer/wasi";
 import wasiBindings from "@wasmer/wasi/lib/bindings/browser";
-import { parseQuery } from 'vue-router';
 
 let rustExports: RustrustExports;
 
-let mergeProgress = (progress: Progress) => {};
+let mergeProgress: (p: Progress) => void = () => {
+  return;
+};
 
 const vecSize = (3 * 32) / 8;
 
@@ -115,24 +116,25 @@ interface RustrustExports {
   "merge_result_drop"(mergeResult: number): void;
 }
 
-const enum Progress {
+export const enum Progress {
   Load = 1,
   Wasm,
   Extract,
   Merge,
   Store,
   Pack,
-  Js
+  Js,
+  Done
 }
 
-export async function startWasiTask() {
+async function _startWasi() {
   // Instantiate a new WASI Instance
   const wasi = new WASI({
     env: { RUST_BACKTRACE: "1" },
     bindings: { ...wasiBindings }
   });
 
-  const response = fetch("./merge-jwl.wasm");
+  const response = fetch("/merge-jwl.wasm");
   const module = await (typeof WebAssembly.compileStreaming === "function"
     ? WebAssembly.compileStreaming(response)
     : WebAssembly.compile(await (await response).arrayBuffer()));
@@ -155,6 +157,12 @@ export async function startWasiTask() {
   }
 }
 
+let startWasiTask: undefined | Promise<void>;
+
+export function startWasi() {
+  startWasiTask = _startWasi();
+}
+
 interface ManifestJson {
   name: string;
   creationDate: string;
@@ -175,59 +183,90 @@ interface NoteText {
   date: string;
 }
 
-interface MessageJson {
+export interface BookmarkOverflow {
+  keySymbol: string | null;
+  issueTagNumber: number;
+  title: string;
+  snippet: string | null;
+}
+
+export interface Note {
+  before: NoteText;
+  after: NoteText;
+}
+
+export interface MessageJson {
   error?: string;
-  noteUpdate: { before: NoteText; after: NoteText };
-  bookmarkOverflow: {
-    keySymbol: string | null;
-    issueTagNumber: number;
-    title: string;
-    snippet: string | null;
-  };
+  noteUpdate?: Note;
+  bookmarkOverflow?: BookmarkOverflow;
 }
 
 interface MergeJson {
-  manifest: ManifestJson;
-  messages: [MessageJson];
+  inputManifests: ManifestJson[];
+  resultManifest: ManifestJson | null;
+  messages: MessageJson[];
 }
 
 function parseResult(resultPtr: number) {
   const resultBuf = rustExports.vec_buffer(resultPtr);
   const resultLen = rustExports.vec_len(resultPtr);
-  return JSON.parse(
-    fromRustStr(resultBuf, resultLen)
-  ) as MergeJson
+  return JSON.parse(fromRustStr(resultBuf, resultLen)) as MergeJson;
 }
 
-class Merge {
+export class Merge {
   file: File | null;
-  messages: [MessageJson];
+  messages: MessageJson[];
+  objectURL?: string;
 
   constructor(private filePtr: number) {
     if (filePtr == 0) {
       throw new Error("Returned null");
     }
     const mergeResult = parseResult(filePtr + vecSize);
-    console.debug(mergeResult);
+    console.debug("mergeResult", mergeResult);
     const fileOption = new Int32Array(rustExports.memory.buffer, filePtr, 1);
-    if (fileOption[0] == 0) {
+    if (fileOption[0] == 0 || !mergeResult.resultManifest) {
       this.file = null;
     } else {
       const len = rustExports.vec_len(filePtr);
       const buf = rustExports.vec_buffer(filePtr);
-      const blob = new Blob([new Uint8Array(rustExports.memory.buffer, buf, len)]);
-      const fileName = mergeResult.manifest.name + ".jwlibrary";
+      const blob = new Blob([
+        new Uint8Array(rustExports.memory.buffer, buf, len)
+      ]);
+      const fileName = mergeResult.resultManifest.name + ".jwlibrary";
       this.file = new File([blob], fileName);
     }
     this.messages = mergeResult.messages;
   }
 
   drop() {
+    if (this.objectURL) {
+      URL.revokeObjectURL(this.objectURL);
+    }
     rustExports.merge_result_drop(this.filePtr);
+  }
+
+  download() {
+    if (this.file) {
+      const a = document.createElement("a");
+      a.download = this.file.name;
+      a.rel = "noopener";
+      this.objectURL = URL.createObjectURL(this.file);
+      a.href = this.objectURL;
+      a.click();
+    }
   }
 }
 
-export async function mergeUploads(files: FileList) {
+export async function mergeUploads(
+  files: FileList,
+  progress: (progress: Progress) => void
+) {
+  if (!startWasiTask) {
+    throw new Error("WASI was not started");
+  }
+  await startWasiTask;
+  mergeProgress = progress;
   const len = files.length;
   if (len < 2) {
     throw new Error("Merge 2 or more files");
@@ -246,5 +285,10 @@ export async function mergeUploads(files: FileList) {
     toRustString(new Date().toISOString().substr(0, 10))
   );
   mergeProgress(Progress.Js);
-
+  mergeProgress = () => {
+    return;
+  };
+  const merge = new Merge(filePtr);
+  mergeProgress(Progress.Done);
+  return merge;
 }

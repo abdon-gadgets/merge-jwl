@@ -29,8 +29,10 @@ pub fn merge_databases(mut originals: impl Iterator<Item = Database>) -> MergeRe
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(rename_all = "camelCase")]
 pub enum Message {
+    #[cfg(target_arch = "wasm32")]
+    Error(String),
     NoteUpdate {
         before: NoteText,
         after: NoteText,
@@ -39,21 +41,23 @@ pub enum Message {
         key_symbol: Option<Rc<String>>,
         issue_tag_number: u32,
         title: Rc<String>,
-        snippet: Rc<String>,
+        snippet: Option<Rc<String>>,
     },
 }
 
 #[derive(Debug, Serialize)]
 pub struct NoteText {
-    title: Rc<String>,
-    content: Rc<String>,
+    title: Option<Rc<String>>,
+    content: Option<Rc<String>>,
+    date: Rc<String>,
 }
 
 impl NoteText {
     fn from(note: &Note) -> Self {
         NoteText {
-            title: note.title.clone().unwrap_or_default(),
-            content: note.content.clone().unwrap_or_default(),
+            title: note.title.clone(),
+            content: note.content.clone(),
+            date: note.last_modified.clone(),
         }
     }
 }
@@ -189,7 +193,7 @@ impl<'a> Merge<'a> {
                         key_symbol: location.key_symbol.clone(),
                         issue_tag_number: location.issue_tag_number,
                         title: src.title,
-                        snippet: src.snippet.unwrap_or_default(),
+                        snippet: src.snippet.clone(),
                     });
                     continue;
                 }

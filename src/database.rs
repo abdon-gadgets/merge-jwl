@@ -59,7 +59,7 @@ pub struct Note {
     /// User-defined note content.
     pub content: Option<Rc<String>>,
     /// Time stamp when the note was last edited, ISO 8601 format.
-    pub last_modified: String,
+    pub last_modified: Rc<String>,
     /// The type of block associated with the note.
     /// Types:
     /// - 0: The note is associated with the document rather than a block of text within it.
@@ -310,7 +310,7 @@ fn read_notes(conn: &Connection) -> rusqlite::Result<Vec<Note>> {
             location_id: r.get(3)?,
             title: r.get::<_, Option<String>>(4)?.map(Rc::new),
             content: r.get::<_, Option<String>>(5)?.map(Rc::new),
-            last_modified: r.get(6)?,
+            last_modified: Rc::new(r.get(6)?),
             block_type: r.get(7)?,
             block_identifier: r.get(8)?,
         })

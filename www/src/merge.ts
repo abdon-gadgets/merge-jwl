@@ -1,7 +1,10 @@
 import { WASI } from "@wasmer/wasi";
 import wasiBindings from "@wasmer/wasi/lib/bindings/browser";
+import { parseQuery } from 'vue-router';
 
 let rustExports: RustrustExports;
+
+let mergeProgress = (progress: Progress) => {};
 
 const vecSize = (3 * 32) / 8;
 
@@ -112,6 +115,16 @@ interface RustrustExports {
   "merge_result_drop"(mergeResult: number): void;
 }
 
+const enum Progress {
+  Load = 1,
+  Wasm,
+  Extract,
+  Merge,
+  Store,
+  Pack,
+  Js
+}
+
 export async function startWasiTask() {
   // Instantiate a new WASI Instance
   const wasi = new WASI({
@@ -129,7 +142,8 @@ export async function startWasiTask() {
       "js_console_panic": (ptr: number, len: number) =>
         // eslint-disable-next-line no-console
         console.error(fromRustStr(ptr, len)),
-      "js_console_trace": consoleTrace
+      "js_console_trace": consoleTrace,
+      "js_merge_progress": mergeProgress
     }
   });
   rustExports = (instance.exports as unknown) as RustrustExports;
@@ -141,20 +155,76 @@ export async function startWasiTask() {
   }
 }
 
-interface Manifest {
+interface ManifestJson {
   name: string;
   creationDate: string;
   version: number;
   type: number;
-  userDataBackup: UserDataBackup;
+  userDataBackup: {
+    lastModifiedDate: string;
+    deviceName: string;
+    databaseName: string;
+    hash: string;
+    schemaVersion: number;
+  };
 }
 
-interface UserDataBackup {
-  lastModifiedDate: string;
-  deviceName: string;
-  databaseName: string;
-  hash: string;
-  schemaVersion: number;
+interface NoteText {
+  title: string | null;
+  content: string | null;
+  date: string;
+}
+
+interface MessageJson {
+  error?: string;
+  noteUpdate: { before: NoteText; after: NoteText };
+  bookmarkOverflow: {
+    keySymbol: string | null;
+    issueTagNumber: number;
+    title: string;
+    snippet: string | null;
+  };
+}
+
+interface MergeJson {
+  manifest: ManifestJson;
+  messages: [MessageJson];
+}
+
+function parseResult(resultPtr: number) {
+  const resultBuf = rustExports.vec_buffer(resultPtr);
+  const resultLen = rustExports.vec_len(resultPtr);
+  return JSON.parse(
+    fromRustStr(resultBuf, resultLen)
+  ) as MergeJson
+}
+
+class Merge {
+  file: File | null;
+  messages: [MessageJson];
+
+  constructor(private filePtr: number) {
+    if (filePtr == 0) {
+      throw new Error("Returned null");
+    }
+    const mergeResult = parseResult(filePtr + vecSize);
+    console.debug(mergeResult);
+    const fileOption = new Int32Array(rustExports.memory.buffer, filePtr, 1);
+    if (fileOption[0] == 0) {
+      this.file = null;
+    } else {
+      const len = rustExports.vec_len(filePtr);
+      const buf = rustExports.vec_buffer(filePtr);
+      const blob = new Blob([new Uint8Array(rustExports.memory.buffer, buf, len)]);
+      const fileName = mergeResult.manifest.name + ".jwlibrary";
+      this.file = new File([blob], fileName);
+    }
+    this.messages = mergeResult.messages;
+  }
+
+  drop() {
+    rustExports.merge_result_drop(this.filePtr);
+  }
 }
 
 export async function mergeUploads(files: FileList) {
@@ -162,6 +232,7 @@ export async function mergeUploads(files: FileList) {
   if (len < 2) {
     throw new Error("Merge 2 or more files");
   }
+  mergeProgress(Progress.Load);
   const intputVecs = await Promise.all(
     Array.from(files).map(f => streamIntoVec(uploadFile(f)))
   );
@@ -169,18 +240,11 @@ export async function mergeUploads(files: FileList) {
   const inputsBuf = rustExports.vec_buffer(inputsPtr);
   new Uint32Array(rustExports.memory.buffer, inputsBuf, len).set(intputVecs);
   rustExports.vec_set_len(inputsPtr, len);
+  mergeProgress(Progress.Wasm);
   const filePtr = rustExports.jwl_merge(
     inputsPtr,
     toRustString(new Date().toISOString().substr(0, 10))
   );
-  if (filePtr == 0) {
-    throw new Error("Merge failed");
-  }
-  const manifestPtr = filePtr + vecSize;
-  const manifestBuf = rustExports.vec_buffer(manifestPtr);
-  const manifestLen = rustExports.vec_len(manifestPtr);
-  const manifest = JSON.parse(fromRustStr(manifestBuf, manifestLen)) as Manifest;
-  console.debug(manifest);
-  rustExports.merge_result_drop(filePtr);
-  return manifest;
+  mergeProgress(Progress.Js);
+
 }

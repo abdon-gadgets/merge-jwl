@@ -26,7 +26,7 @@ fn main() -> Result<()> {
         .map(|p| File::open(p).context("Couldn't open input file"))
         .collect::<Result<Vec<File>>>()?;
 
-    let merge = run(input_files)?;
+    let merge = run(input_files, |p| println!("Progress {:?}", p))?;
     for message in &merge.messages {
         event!(Level::INFO, ?message);
     }
@@ -53,15 +53,36 @@ fn main() {
     wasi::main();
 }
 
+#[repr(u16)]
+#[derive(Debug, Copy, Clone)]
+pub enum Progress {
+    /// Upload/download, streaming to WebAssembly memory.
+    Load = 1,
+    /// Invoke the WebAssembly module.
+    Wasm,
+    /// Read, unzip, check hash, JSON decode, deserialize SQLite and clean backup files.
+    Extract,
+    /// Merge the files.
+    Merge,
+    /// Store the result in a new SQLite database and serialize.
+    Store,
+    /// Hash, JSON encode and zip.
+    Pack = 6,
+}
+
 pub struct Merge {
     manifests: Vec<Manifest>,
     mem_file: Vec<u8>,
     messages: Vec<Message>,
 }
 
-pub fn run(input_files: Vec<impl io::Read + io::Seek>) -> Result<Merge> {
+pub fn run(
+    input_files: Vec<impl io::Read + io::Seek>,
+    progress: impl Fn(Progress),
+) -> Result<Merge> {
     let mut databases = Vec::with_capacity(input_files.len());
     let mut manifests = Vec::with_capacity(input_files.len());
+    progress(Progress::Load);
     for input in input_files {
         event!(Level::INFO, "Loading");
         let mut backup = load(input)?;
@@ -77,8 +98,9 @@ pub fn run(input_files: Vec<impl io::Read + io::Seek>) -> Result<Merge> {
         databases.push(backup.database);
         manifests.push(backup.manifest);
     }
-
+    progress(Progress::Merge);
     let (database, messages) = merge_databases(databases.into_iter())?;
+    progress(Progress::Store);
     let mem_file = database.serialize()?;
     Ok(Merge {
         manifests,

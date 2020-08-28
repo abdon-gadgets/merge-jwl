@@ -1,6 +1,7 @@
 #![allow(clippy::box_vec, clippy::boxed_local)]
 
-use crate::Result;
+use crate::{Manifest, Message, Result};
+use serde::Serialize;
 use std::{
     io::{self, Cursor},
     panic,
@@ -15,7 +16,7 @@ pub fn main() {
         }
     }));
     tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::ERROR)
         .with_writer(|| DebugWriter)
         .without_time()
         .json()
@@ -73,7 +74,7 @@ pub extern "C" fn vec_u8_drop(_vec: Box<Vec<u8>>) {}
 pub unsafe extern "C" fn jwl_merge(
     inputs: Box<Vec<Box<Vec<u8>>>>,
     date_now: Box<Vec<u8>>,
-) -> Option<Box<MergeResult>> {
+) -> Option<Box<JsMerge>> {
     let inputs = inputs.into_iter().map(|v| *v).collect();
     match merge(inputs, String::from_utf8_unchecked(*date_now)) {
         Ok(output) => Some(Box::new(output)),
@@ -85,25 +86,34 @@ pub unsafe extern "C" fn jwl_merge(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn merge_result_drop(_: Option<Box<MergeResult>>) {}
+pub unsafe extern "C" fn merge_result_drop(_: Option<Box<JsMerge>>) {}
 
-fn merge(inputs: Vec<Vec<u8>>, date_now: String) -> Result<MergeResult> {
+fn merge(inputs: Vec<Vec<u8>>, date_now: String) -> Result<JsMerge> {
     let max_size: usize = inputs.iter().map(|i| i.len()).sum();
     let inputs = inputs.into_iter().map(Cursor::new).collect();
-    let (manifests, mem_file) = crate::run(inputs)?;
-    let manifest = crate::update_manifest(&manifests, &mem_file, date_now);
+    let merge = crate::run(inputs)?;
+    let manifest = crate::update_manifest(&merge, date_now);
     let mut output_file = Cursor::new(Vec::with_capacity(max_size / 3 * 2));
-    crate::compress(&manifest, mem_file, &mut output_file)?;
-    Ok(MergeResult {
+    crate::compress(&manifest, merge.mem_file, &mut output_file)?;
+    Ok(JsMerge {
         file: output_file.into_inner(),
-        manifest: serde_json::to_vec(&manifest)?,
+        result: serde_json::to_vec(&Json {
+            messages: merge.messages,
+            manifest,
+        })?,
     })
 }
 
 #[repr(C)]
-pub struct MergeResult {
+pub struct JsMerge {
     file: Vec<u8>,
-    manifest: Vec<u8>,
+    result: Vec<u8>,
+}
+
+#[derive(Serialize)]
+struct Json {
+    manifest: Manifest,
+    messages: Vec<Message>,
 }
 
 struct DebugWriter;

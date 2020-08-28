@@ -1,36 +1,67 @@
-use crate::database::{BlockRange, Location, TagMap};
+use crate::database::{BlockRange, Location, Note, TagMap};
 use crate::{anyhow, bail, Database, Result};
 use chrono::DateTime;
+use serde::Serialize;
+use tracing::{event, Level};
+
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::rc::Rc;
-use tracing::{event, Level};
 
-pub fn merge_databases(mut originals: impl Iterator<Item = Database>) -> Result<Database> {
+type MergeResult = Result<(Database, Vec<Message>)>;
+
+pub fn merge_databases(mut originals: impl Iterator<Item = Database>) -> MergeResult {
     let mut result = originals.next().ok_or_else(|| anyhow!("At least 1 db"))?;
+    let mut messages = Vec::new();
     for mut database in originals {
         event!(Level::DEBUG, "Merge databases");
-        merge(&mut database, &mut result)?;
+        let mut s = Merge::new(&mut database, &mut result, &mut messages);
+        // TODO: First merge all locations
+        s.merge_bookmarks()?;
+        s.merge_user_marks()?;
+        s.merge_notes()?;
+        s.merge_block_ranges()?;
+        s.merge_tags()?;
+        s.merge_tag_maps()?;
+        s.merge_input_field()?;
     }
-    Ok(result)
+    Ok((result, messages))
 }
 
-fn merge(src: &mut Database, dst: &mut Database) -> Result<()> {
-    let mut s = Merge::new(src, dst);
-    // TODO: First merge all locations
-    s.merge_bookmarks()?;
-    s.merge_user_marks()?;
-    s.merge_notes()?;
-    s.merge_block_ranges()?;
-    s.merge_tags()?;
-    s.merge_tag_maps()?;
-    s.merge_input_field()?;
-    Ok(())
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum Message {
+    NoteUpdate {
+        before: NoteText,
+        after: NoteText,
+    },
+    BookmarkOverflow {
+        key_symbol: Option<Rc<String>>,
+        issue_tag_number: u32,
+        title: Rc<String>,
+        snippet: Rc<String>,
+    },
+}
+
+#[derive(Debug, Serialize)]
+pub struct NoteText {
+    title: Rc<String>,
+    content: Rc<String>,
+}
+
+impl NoteText {
+    fn from(note: &Note) -> Self {
+        NoteText {
+            title: note.title.clone().unwrap_or_default(),
+            content: note.content.clone().unwrap_or_default(),
+        }
+    }
 }
 
 struct Merge<'a> {
     src: &'a mut Database,
     dst: &'a mut Database,
+    messages: &'a mut Vec<Message>,
     user_mark_translate: HashMap<u32, u32>,
     note_translate: HashMap<u32, u32>,
     tag_translate: HashMap<u32, u32>,
@@ -38,7 +69,7 @@ struct Merge<'a> {
 }
 
 struct LocationMerge {
-    location_translate: HashMap<u32, u32>,
+    location_translate: HashMap<u32, (u32, LocationValue)>,
     src_location_index: HashMap<u32, Location>,
     dst_location_value_index: HashMap<LocationValue, u32>,
     location_max_id: u32,
@@ -72,7 +103,7 @@ impl LocationValue {
 }
 
 impl<'a> Merge<'a> {
-    fn new(src: &'a mut Database, dst: &'a mut Database) -> Self {
+    fn new(src: &'a mut Database, dst: &'a mut Database, messages: &'a mut Vec<Message>) -> Self {
         Merge {
             user_mark_translate: HashMap::new(),
             note_translate: HashMap::new(),
@@ -100,6 +131,7 @@ impl<'a> Merge<'a> {
             },
             src,
             dst,
+            messages,
         }
     }
 
@@ -117,10 +149,11 @@ impl<'a> Merge<'a> {
         for mut src in self.src.bookmarks.drain(..) {
             src.location_id = self
                 .location
-                .get_or_insert_location(&mut self.dst.locations, src.location_id);
+                .insert_location(&mut self.dst.locations, src.location_id);
+            let src_publication_location_id = src.publication_location_id;
             src.publication_location_id = self
                 .location
-                .get_or_insert_location(&mut self.dst.locations, src.publication_location_id);
+                .insert_location(&mut self.dst.locations, src.publication_location_id);
             // TODO: Understand `existingBookmark = destination.FindBookmark`
             max_id += 1;
             src.bookmark_id = max_id;
@@ -136,13 +169,30 @@ impl<'a> Merge<'a> {
                 .collect();
             if slots.contains(&src.slot) {
                 slots.sort();
-                src.slot = slots
+                if let Some(slot) = slots
                     .into_iter()
                     .enumerate()
                     .map(|(i, b)| (i as u32, b))
                     .find(|(i, b)| b != i)
                     .map(|i| i.0)
-                    .ok_or_else(|| anyhow!("All bookmark slots are filled"))?;
+                {
+                    src.slot = slot;
+                } else {
+                    event!(Level::DEBUG, ?src, "All bookmark slots are filled");
+                    let location = &self
+                        .location
+                        .location_translate
+                        .get(&src_publication_location_id)
+                        .unwrap()
+                        .1;
+                    self.messages.push(Message::BookmarkOverflow {
+                        key_symbol: location.key_symbol.clone(),
+                        issue_tag_number: location.issue_tag_number,
+                        title: src.title,
+                        snippet: src.snippet.unwrap_or_default(),
+                    });
+                    continue;
+                }
             }
             self.dst.bookmarks.push(src);
         }
@@ -205,34 +255,17 @@ impl<'a> Merge<'a> {
             if let Some(dst) = guid_map.get_mut(&parse_guid(&src.guid)?) {
                 let src_time = DateTime::parse_from_rfc3339(&src.last_modified)?;
                 let dst_time = DateTime::parse_from_rfc3339(&dst.last_modified)?;
-                if dst_time < src_time {
+                let (before, after) = if dst_time < src_time {
                     // note already exists in destination, but it's older
                     // TODO: Show the diff to the user
-                    event!(
-                        Level::INFO,
-                        "Update note\n{} ({})\n{}\n{} ({})\n{}",
-                        dst.title.as_ref().map_or("", String::as_str),
-                        &dst.last_modified,
-                        dst.content.as_ref().map_or("", String::as_str),
-                        src.title.as_ref().map_or("", String::as_str),
-                        &src.last_modified,
-                        src.content.as_ref().map_or("", String::as_str)
-                    );
                     dst.title = src.title.clone();
                     dst.content = src.content.clone();
                     dst.last_modified = src.last_modified.clone();
+                    (NoteText::from(&**dst), NoteText::from(&src))
                 } else {
-                    event!(
-                        Level::INFO,
-                        "Ignore outdated note\n{} ({})\n{}\n{} ({})\n{}",
-                        dst.title.as_ref().map_or("", String::as_str),
-                        &dst.last_modified,
-                        dst.content.as_ref().map_or("", String::as_str),
-                        src.title.as_ref().map_or("", String::as_str),
-                        &src.last_modified,
-                        src.content.as_ref().map_or("", String::as_str)
-                    );
-                }
+                    (NoteText::from(&src), NoteText::from(&**dst))
+                };
+                self.messages.push(Message::NoteUpdate { before, after });
                 self.note_translate.insert(src.note_id, dst.note_id);
             } else {
                 // insert note
@@ -251,7 +284,7 @@ impl<'a> Merge<'a> {
                 if let Some(location_id) = src.location_id {
                     src.location_id = Some(
                         self.location
-                            .get_or_insert_location(&mut self.dst.locations, location_id),
+                            .insert_location(&mut self.dst.locations, location_id),
                     );
                 }
                 new_notes.push(src);
@@ -353,7 +386,7 @@ impl<'a> Merge<'a> {
             if let Some(location_id) = src.location_id {
                 let location_id = self
                     .location
-                    .get_or_insert_location(&mut self.dst.locations, location_id);
+                    .insert_location(&mut self.dst.locations, location_id);
                 // TODO: It is not known if location was equivalent translation
                 if !location_index.contains(&(tag_id, location_id)) {
                     src.location_id = Some(location_id);
@@ -399,35 +432,27 @@ impl<'a> Merge<'a> {
 
 impl LocationMerge {
     fn insert_location(&mut self, dst: &mut Vec<Location>, location_id: u32) -> u32 {
-        if let Some(&translation) = self.location_translate.get(&location_id) {
-            translation
+        if let Some(translation) = self.location_translate.get(&location_id) {
+            translation.0
         } else {
             let mut location = self
                 .src_location_index
                 .remove(&location_id)
                 .expect("Foreign key LocationId violated");
-            if let Some(&equivalent) = self
-                .dst_location_value_index
-                .get(&LocationValue::from(&location))
-            {
-                self.location_translate.insert(location_id, equivalent);
+            let value = LocationValue::from(&location);
+            if let Some(&equivalent) = self.dst_location_value_index.get(&value) {
+                self.location_translate
+                    .insert(location_id, (equivalent, value));
                 equivalent
             } else {
                 self.location_max_id += 1;
                 let new_id = self.location_max_id;
                 location.location_id = new_id;
-                self.location_translate.insert(location_id, new_id);
+                self.location_translate.insert(location_id, (new_id, value));
                 dst.push(location);
                 new_id
             }
         }
-    }
-
-    fn get_or_insert_location(&mut self, dst: &mut Vec<Location>, id: u32) -> u32 {
-        self.location_translate
-            .get(&id)
-            .copied()
-            .unwrap_or_else(|| self.insert_location(dst, id))
     }
 }
 
@@ -480,15 +505,15 @@ mod test {
     }
 
     #[test]
-    fn test_merge_bookmarks() -> Result<()> {
+    fn test_merge_bookmarks() -> std::result::Result<(), Vec<Message>> {
         fn with_slot(slot: u32) -> Bookmark {
             Bookmark {
                 bookmark_id: 123,
                 location_id: 123,
                 publication_location_id: 123,
                 slot,
-                title: "foo".to_string(),
-                snippet: Some("bar".to_string()),
+                title: Rc::new("foo".to_string()),
+                snippet: Some("bar".to_string().into()),
                 block_type: 1,
                 block_identifier: Some(18),
             }
@@ -507,7 +532,7 @@ mod test {
                 title: None,
             }]
         }
-        fn merge_slots(src: &[u32], dst: &[u32]) -> Result<Vec<u32>> {
+        fn merge_slots(src: &[u32], dst: &[u32]) -> std::result::Result<Vec<u32>, Vec<Message>> {
             let mut src = Database {
                 locations: some_locations(),
                 bookmarks: src.iter().copied().map(with_slot).collect(),
@@ -518,11 +543,16 @@ mod test {
                 bookmarks: dst.iter().copied().map(with_slot).collect(),
                 ..Default::default()
             };
-            let mut state = Merge::new(&mut src, &mut dst);
-            state.merge_bookmarks()?;
+            let mut messages = Vec::new();
+            let mut state = Merge::new(&mut src, &mut dst, &mut messages);
+            state.merge_bookmarks().unwrap();
             let mut vec: Vec<u32> = dst.bookmarks.iter().map(|b| b.slot).collect();
             vec.sort();
-            Ok(vec)
+            if !messages.is_empty() {
+                Err(messages)
+            } else {
+                Ok(vec)
+            }
         }
         assert_eq!(&merge_slots(&[3, 4], &[1])?, &[1, 3, 4]);
         assert_eq!(&merge_slots(&[0, 1], &[3])?, &[0, 1, 3]);
@@ -534,8 +564,12 @@ mod test {
             &merge_slots(&[1, 3], &[0, 1, 2, 3, 4, 5, 6, 7])?,
             &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         );
-        merge_slots(&[1, 3], &[0, 1, 2, 3, 4, 5, 6, 7, 8]).unwrap_err();
-        merge_slots(&[7], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap_err();
+        let e = merge_slots(&[1, 3], &[0, 1, 2, 3, 4, 5, 6, 7, 8]).unwrap_err();
+        assert_eq!(e.len(), 1);
+        let e = merge_slots(&[7], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap_err();
+        assert_eq!(e.len(), 1);
+        let e = merge_slots(&[2, 4], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap_err();
+        assert_eq!(e.len(), 2);
         Ok(())
     }
 }

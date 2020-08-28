@@ -55,9 +55,9 @@ pub struct Note {
     /// Location reference.
     pub location_id: Option<u32>,
     /// User-defined note title.
-    pub title: Option<String>,
+    pub title: Option<Rc<String>>,
     /// User-defined note content.
-    pub content: Option<String>,
+    pub content: Option<Rc<String>>,
     /// Time stamp when the note was last edited, ISO 8601 format.
     pub last_modified: String,
     /// The type of block associated with the note.
@@ -141,9 +141,9 @@ pub struct Bookmark {
     /// Zero-based order of bookmarks (one of 10 slots with different colors).
     pub slot: u32,
     /// Title.
-    pub title: String,
+    pub title: Rc<String>,
     /// Snippet of bookmarked text.
-    pub snippet: Option<String>,
+    pub snippet: Option<Rc<String>>,
     /// Block type:
     /// - 0: Bible chapter?
     /// - 1: Publication paragraph
@@ -308,8 +308,8 @@ fn read_notes(conn: &Connection) -> rusqlite::Result<Vec<Note>> {
             guid: r.get(1)?,
             user_mark_id: r.get(2)?,
             location_id: r.get(3)?,
-            title: r.get(4)?,
-            content: r.get(5)?,
+            title: r.get::<_, Option<String>>(4)?.map(Rc::new),
+            content: r.get::<_, Option<String>>(5)?.map(Rc::new),
             last_modified: r.get(6)?,
             block_type: r.get(7)?,
             block_identifier: r.get(8)?,
@@ -382,8 +382,8 @@ fn read_bookmarks(conn: &Connection) -> rusqlite::Result<Vec<Bookmark>> {
             location_id: r.get(1)?,
             publication_location_id: r.get(2)?,
             slot: r.get(3)?,
-            title: r.get(4)?,
-            snippet: r.get(5)?,
+            title: Rc::new(r.get(4)?),
+            snippet: r.get::<_, Option<String>>(5)?.map(Rc::new),
             block_type: r.get(6)?,
             block_identifier: r.get(7)?,
         })

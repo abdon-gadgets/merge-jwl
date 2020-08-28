@@ -6,7 +6,7 @@ mod wasi;
 
 use crate::cleaner::clean;
 use crate::database::Database;
-use crate::merger::merge_databases;
+use crate::merger::{merge_databases, Message};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{event, Level};
@@ -26,11 +26,14 @@ fn main() -> Result<()> {
         .map(|p| File::open(p).context("Couldn't open input file"))
         .collect::<Result<Vec<File>>>()?;
 
-    let (manifests, mem_file) = run(input_files)?;
+    let merge = run(input_files)?;
+    for message in &merge.messages {
+        event!(Level::INFO, ?message);
+    }
     let now = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
         .format("%F")
         .to_string();
-    let manifest = update_manifest(&manifests, &mem_file, now);
+    let manifest = update_manifest(&merge, now);
     let mut path = std::path::PathBuf::from(".");
     path.set_file_name(&manifest.name);
     path.set_extension("jwlibrary");
@@ -39,7 +42,7 @@ fn main() -> Result<()> {
         .create(true)
         .open(path)
         .context("Couldn't open output file")?;
-    compress(&manifest, mem_file, &mut output_file)?;
+    compress(&manifest, merge.mem_file, &mut output_file)?;
 
     event!(Level::INFO, "Finished");
     Ok(())
@@ -50,7 +53,13 @@ fn main() {
     wasi::main();
 }
 
-pub fn run(input_files: Vec<impl io::Read + io::Seek>) -> Result<BackupVec> {
+pub struct Merge {
+    manifests: Vec<Manifest>,
+    mem_file: Vec<u8>,
+    messages: Vec<Message>,
+}
+
+pub fn run(input_files: Vec<impl io::Read + io::Seek>) -> Result<Merge> {
     let mut databases = Vec::with_capacity(input_files.len());
     let mut manifests = Vec::with_capacity(input_files.len());
     for input in input_files {
@@ -69,12 +78,14 @@ pub fn run(input_files: Vec<impl io::Read + io::Seek>) -> Result<BackupVec> {
         manifests.push(backup.manifest);
     }
 
-    let database = merge_databases(databases.into_iter())?;
+    let (database, messages) = merge_databases(databases.into_iter())?;
     let mem_file = database.serialize()?;
-    Ok((manifests, mem_file))
+    Ok(Merge {
+        manifests,
+        mem_file,
+        messages,
+    })
 }
-
-pub type BackupVec = (Vec<Manifest>, Vec<u8>);
 
 struct Backup {
     manifest: Manifest,
@@ -135,11 +146,12 @@ fn compute_hash(file: &[u8]) -> String {
     format!("{:x}", hash)
 }
 
-pub fn update_manifest(originals: &[Manifest], mem_file: &[u8], date: String) -> Manifest {
-    let hash = compute_hash(mem_file);
+pub fn update_manifest(merge: &Merge, date: String) -> Manifest {
+    let hash = compute_hash(&merge.mem_file);
     // pick the first manifest as the basis for the manifest in the final merged file
-    let base = &originals[0];
-    let mut device_name: Vec<&str> = originals
+    let base = &merge.manifests[0];
+    let mut device_name: Vec<&str> = merge
+        .manifests
         .iter()
         .map(|d| d.user_data_backup.device_name.as_str())
         .collect();

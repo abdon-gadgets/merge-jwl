@@ -30,7 +30,8 @@ export default defineComponent({
     fileInputChange: async function(e: Event) {
       const files = (e.target as HTMLInputElement).files;
       if (files && files.length > 1) {
-        await mergeUploads(files);
+        const manifest = await mergeUploads(files);
+        this.wasmHello = manifest.name;
       }
     },
   },

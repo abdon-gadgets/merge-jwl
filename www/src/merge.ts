@@ -3,7 +3,7 @@ import wasiBindings from "@wasmer/wasi/lib/bindings/browser";
 
 let rustExports: RustrustExports;
 
-const vecSize = 3 * 32 / 8;
+const vecSize = (3 * 32) / 8;
 
 function fromRustStr(ptr: number, len: number): string {
   const view = new Uint8Array(rustExports.memory.buffer, ptr, len);
@@ -22,13 +22,9 @@ function fromRustStr(ptr: number, len: number): string {
 function toRustString(str: string) {
   const array = new TextEncoder().encode(str);
   const len = array.length;
-  const vec = rustExports.vec_u8_with_capacity(len)
-  const buf = rustExports.vec_buffer(vec)
-  const view = new Uint8Array(
-    rustExports.memory.buffer,
-    buf,
-    len
-  );
+  const vec = rustExports.vec_u8_with_capacity(len);
+  const buf = rustExports.vec_buffer(vec);
+  const view = new Uint8Array(rustExports.memory.buffer, buf, len);
   view.set(array);
   rustExports.vec_set_len(vec, len);
   return vec;
@@ -68,7 +64,7 @@ async function streamIntoVec(stream: StreamWithSize): Promise<number> {
       position += res.value.length;
     }
     if (position != stream.size) {
-      throw new Error('Content-Length was higher');
+      throw new Error("Content-Length was higher");
     }
     rustExports.vec_set_len(vec, position);
   } catch (e) {
@@ -145,28 +141,46 @@ export async function startWasiTask() {
   }
 }
 
+interface Manifest {
+  name: string;
+  creationDate: string;
+  version: number;
+  type: number;
+  userDataBackup: UserDataBackup;
+}
+
+interface UserDataBackup {
+  lastModifiedDate: string;
+  deviceName: string;
+  databaseName: string;
+  hash: string;
+  schemaVersion: number;
+}
+
 export async function mergeUploads(files: FileList) {
   const len = files.length;
   if (len < 2) {
     throw new Error("Merge 2 or more files");
   }
-  const intputVecs = await Promise.all(Array.from(files).map(f => streamIntoVec(uploadFile(f))));
+  const intputVecs = await Promise.all(
+    Array.from(files).map(f => streamIntoVec(uploadFile(f)))
+  );
   const inputsPtr = rustExports.vec_vec_with_capacity(len);
   const inputsBuf = rustExports.vec_buffer(inputsPtr);
-  new Uint32Array(
-    rustExports.memory.buffer,
-    inputsBuf,
-    len
-  ).set(intputVecs);
+  new Uint32Array(rustExports.memory.buffer, inputsBuf, len).set(intputVecs);
   rustExports.vec_set_len(inputsPtr, len);
-  const filePtr = rustExports.jwl_merge(inputsPtr, toRustString(new Date().toISOString().substr(0,10)));
+  const filePtr = rustExports.jwl_merge(
+    inputsPtr,
+    toRustString(new Date().toISOString().substr(0, 10))
+  );
   if (filePtr == 0) {
     throw new Error("Merge failed");
   }
   const manifestPtr = filePtr + vecSize;
   const manifestBuf = rustExports.vec_buffer(manifestPtr);
   const manifestLen = rustExports.vec_len(manifestPtr);
-  const manifest = JSON.parse(fromRustStr(manifestBuf, manifestLen));
+  const manifest = JSON.parse(fromRustStr(manifestBuf, manifestLen)) as Manifest;
   console.debug(manifest);
   rustExports.merge_result_drop(filePtr);
+  return manifest;
 }

@@ -17,20 +17,14 @@ serde_json = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["std", "alloc"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies.rusqlite]
-git = "https://github.com/TjeuKayim/rusqlite.git"
+#path = "../rusqlite/"
 # FIXME: Wait for pull-request to be merged
-rev="bc558d248f80a57f4b7b26ef5248fa5b3a03ab15"
+git = "https://github.com/abdon-gadgets/rusqlite.git"
 features = ["bundled", "deserialize"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.rusqlite]
-git = "https://github.com/TjeuKayim/rusqlite.git"
-# FIXME: Wait for pull-request to be merged
-rev="bc558d248f80a57f4b7b26ef5248fa5b3a03ab15"
+git = "https://github.com/abdon-gadgets/rusqlite.git"
 features = ["bundled", "deserialize", "wasm32-wasi-vfs"]
-
-#[dependencies.rusqlite]
-#path = "../rusqlite/"
-#features = ["bundled", "deserialize"]
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.

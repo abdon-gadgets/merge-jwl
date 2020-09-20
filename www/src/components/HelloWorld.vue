@@ -60,6 +60,7 @@ import {
 } from "../merge";
 
 function updateProgress(progress: Progress) {
+  console.debug("progress", progress);
   switch (progress) {
     case Progress.Load:
       return "Load";

@@ -279,6 +279,7 @@ export async function mergeUploads(
   new Uint32Array(rustExports.memory.buffer, inputsBuf, len).set(intputVecs);
   rustExports.vec_set_len(inputsPtr, len);
   mergeProgress(Progress.Wasm);
+  await new Promise(resolve => setTimeout(resolve, 0));
   const filePtr = rustExports.jwl_merge(
     inputsPtr,
     toRustString(new Date().toISOString().substr(0, 10))

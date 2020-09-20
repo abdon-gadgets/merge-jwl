@@ -38,7 +38,7 @@
           <div v-for="text in [note.before, note.after]" :key="text">
             <p>{{ text.title }}</p>
             <small>{{ text.content }}</small>
-            <i>{{ new Date(text.date).toLocalString() }}</i>
+            <i>{{ new Date(text.date).toLocaleString() }}</i>
           </div>
         </li>
       </ul>

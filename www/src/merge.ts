@@ -223,7 +223,6 @@ export class Merge {
       throw new Error("Returned null");
     }
     const mergeResult = parseResult(filePtr + vecSize);
-    console.debug("mergeResult", mergeResult);
     const fileOption = new Int32Array(rustExports.memory.buffer, filePtr, 1);
     if (fileOption[0] == 0 || !mergeResult.resultManifest) {
       this.file = null;

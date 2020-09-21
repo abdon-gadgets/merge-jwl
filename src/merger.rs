@@ -45,7 +45,7 @@ pub enum Message {
     },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq)]
 pub struct NoteText {
     title: Option<Rc<String>>,
     content: Option<Rc<String>>,
@@ -269,7 +269,9 @@ impl<'a> Merge<'a> {
                 } else {
                     (NoteText::from(&src), NoteText::from(&**dst))
                 };
-                self.messages.push(Message::NoteUpdate { before, after });
+                if before != after {
+                    self.messages.push(Message::NoteUpdate { before, after });
+                }
                 self.note_translate.insert(src.note_id, dst.note_id);
             } else {
                 // insert note

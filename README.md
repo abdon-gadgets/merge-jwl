@@ -45,5 +45,6 @@ export WASM_OPT=/usr/bin/wasm-opt
 RUSTFLAGS="-C target-feature=-crt-static" cargo wasi build --release
 cp target/wasm32-wasi/release/merge-jwl.wasm www/public/
 cd www
+yarn
 yarn build
 ```

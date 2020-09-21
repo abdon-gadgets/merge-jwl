@@ -28,21 +28,22 @@ others feel differently. Make your own decision on this matter.
 
 ```sh
 cargo build --release
-target/release/merge-jwl previous.jwpub revised.jwpub
+target/release/merge-jwl a.jwlibrary b.jwlibrary c.jwlibrary
 ```
 
 ## Build web app
 
+1. Run `rustup install 1.45.2` (1.46 has a regression)
 1. Run `cargo install cargo-wasi`
 1. Install [`wasi-sdk`](https://github.com/WebAssembly/wasi-sdk)
-1. Install `wasm-opt` from [binaryen](https://github.com/WebAssembly/binaryen) (if the bundled one fails)
+1. Install `wasm-opt` from [binaryen](https://github.com/WebAssembly/binaryen) (the bundled one fails currently)
 1. Install Node.js and Yarn
 
 ```sh
 export CC_wasm32_wasi="/opt/wasi-sdk/bin/clang"
 export CARGO_TARGET_WASM32_WASI_LINKER="/opt/wasi-sdk/bin/clang"
 export WASM_OPT=/usr/bin/wasm-opt
-RUSTFLAGS="-C target-feature=-crt-static" cargo wasi build --release
+RUSTFLAGS="-C target-feature=-crt-static" cargo +1.45.2 wasi build --release
 cp target/wasm32-wasi/release/merge-jwl.wasm www/public/
 cd www
 yarn

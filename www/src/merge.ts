@@ -39,8 +39,26 @@ interface StreamWithSize {
   size: number;
 }
 
+/** Fallback ReadableStream using FileReader */
+function readerFallback(file: File) {
+  // TODO: Use file.webkitSlice() to read chunks
+  return new ReadableStream({
+    start: function (controller) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        controller.enqueue(new Uint8Array(reader.result as ArrayBuffer));
+        controller.close();
+      };
+      reader.onerror = () => controller.error(reader.error);
+      reader.onabort = () => controller.error(new Error("FileReader aborted"));
+      reader.readAsArrayBuffer(file);
+    },
+  });
+}
+
 function uploadFile(file: File): StreamWithSize {
-  return { stream: file.stream(), size: file.size };
+  // Safari does not yet support Blob.stream() https://caniuse.com/mdn-api_blob_slice
+  return { stream: file.stream ? file.stream() : readerFallback(file), size: file.size };
 }
 
 async function streamIntoVec(stream: StreamWithSize): Promise<number> {
@@ -124,14 +142,14 @@ export const enum Progress {
   Store,
   Pack,
   Js,
-  Done
+  Done,
 }
 
 async function _startWasi() {
   // Instantiate a new WASI Instance
   const wasi = new WASI({
     env: { RUST_BACKTRACE: "1" },
-    bindings: { ...wasiBindings }
+    bindings: { ...wasiBindings },
   });
 
   const response = fetch("/merge-jwl.wasm");
@@ -145,8 +163,8 @@ async function _startWasi() {
         // eslint-disable-next-line no-console
         console.error(fromRustStr(ptr, len)),
       "js_console_trace": consoleTrace,
-      "js_merge_progress": mergeProgress
-    }
+      "js_merge_progress": mergeProgress,
+    },
   });
   rustExports = (instance.exports as unknown) as RustrustExports;
 
@@ -230,7 +248,7 @@ export class Merge {
       const len = rustExports.vec_len(filePtr);
       const buf = rustExports.vec_buffer(filePtr);
       const blob = new Blob([
-        new Uint8Array(rustExports.memory.buffer, buf, len)
+        new Uint8Array(rustExports.memory.buffer, buf, len),
       ]);
       const fileName = mergeResult.resultManifest.name + ".jwlibrary";
       this.file = new File([blob], fileName);
@@ -272,14 +290,14 @@ export async function mergeUploads(
   }
   mergeProgress(Progress.Load);
   const intputVecs = await Promise.all(
-    Array.from(files).map(f => streamIntoVec(uploadFile(f)))
+    Array.from(files).map((f) => streamIntoVec(uploadFile(f)))
   );
   const inputsPtr = rustExports.vec_vec_with_capacity(len);
   const inputsBuf = rustExports.vec_buffer(inputsPtr);
   new Uint32Array(rustExports.memory.buffer, inputsBuf, len).set(intputVecs);
   rustExports.vec_set_len(inputsPtr, len);
   mergeProgress(Progress.Wasm);
-  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
   const filePtr = rustExports.jwl_merge(
     inputsPtr,
     toRustString(new Date().toISOString().substr(0, 10))

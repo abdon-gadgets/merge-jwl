@@ -55,7 +55,10 @@ function readerFallback(file: File) {
 
 function uploadFile(file: File): StreamWithSize {
   // Safari does not yet support Blob.stream() https://caniuse.com/mdn-api_blob_slice
-  return { stream: file.stream ? file.stream() : readerFallback(file), size: file.size };
+  return {
+    stream: file.stream ? file.stream() : readerFallback(file),
+    size: file.size,
+  };
 }
 
 async function streamIntoVec(stream: StreamWithSize): Promise<number> {
@@ -150,25 +153,31 @@ async function _startWasi() {
     ? WebAssembly.compileStreaming(response)
     : WebAssembly.compile(await (await response).arrayBuffer()));
 
-  const bindings = new Proxy({
-    "random_get": (bufPtr: number, bufLen: number) => {
-      const view = new Uint8Array(rustExports.memory.buffer, bufPtr, bufLen);
-      crypto.getRandomValues(view);
-      console.debug("random", view);
-      return 0;
+  const bindings = new Proxy(
+    {
+      "random_get": (bufPtr: number, bufLen: number) => {
+        const view = new Uint8Array(rustExports.memory.buffer, bufPtr, bufLen);
+        crypto.getRandomValues(view);
+        console.debug("random", view);
+        return 0;
+      },
+      "fd_prestat_get": () => 8, // ERRNO_BADF Bad file descriptor
     },
-    "fd_prestat_get": () => 8, // ERRNO_BADF Bad file descriptor
-  }, {
-    get: function(target: any, prop) {
-      return (...rest: any[]) => {
-        const original = target[prop];
-        if (original) {
-          return original(...rest);
-        }
-        throw new Error("Unimplemented WASI " + prop.toString());
-      }
+    {
+      get: function <T, U>(
+        target: { [prop: string]: (...rest: T[]) => U },
+        prop: string
+      ): (...rest: T[]) => U {
+        return (...rest: T[]) => {
+          const original = target[prop];
+          if (original) {
+            return original(...rest);
+          }
+          throw new Error("Unimplemented WASI " + prop.toString());
+        };
+      },
     }
-  });
+  );
 
   const instance = await WebAssembly.instantiate(module, {
     "wasi_snapshot_preview1": bindings,

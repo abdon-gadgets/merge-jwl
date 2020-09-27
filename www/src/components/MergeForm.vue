@@ -1,5 +1,5 @@
 <template>
-  <div class="hello">
+  <div>
     <h1>{{ msg }}</h1>
     <label>
       JW Library backup files
@@ -98,7 +98,7 @@ interface Data {
 }
 
 export default defineComponent({
-  name: "HelloWorld",
+  name: "MergeForm",
   props: {
     msg: String,
   },

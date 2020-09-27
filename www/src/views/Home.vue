@@ -1,17 +1,17 @@
 <template>
   <div class="home">
-    <HelloWorld msg="JW Library Notes Sync"/>
+    <MergeForm msg="JW Library Notes Sync"/>
   </div>
 </template>
 
 <script lang="ts">
 import { defineComponent } from 'vue';
-import HelloWorld from '@/components/HelloWorld.vue'; // @ is an alias to /src
+import MergeForm from '@/components/MergeForm.vue'; // @ is an alias to /src
 
 export default defineComponent({
   name: 'Home',
   components: {
-    HelloWorld,
+    MergeForm,
   },
 });
 </script>

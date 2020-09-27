@@ -300,21 +300,22 @@ export class Merge {
 }
 
 export async function mergeUploads(
-  files: FileList,
+  files: Iterable<File>,
   progress: (progress: Progress) => void
 ) {
+  const fileList = Array.from(files);
   if (!startWasiTask) {
     throw new Error("WASI was not started");
   }
   await startWasiTask;
   mergeProgress = progress;
-  const len = files.length;
+  const len = fileList.length;
   if (len < 2) {
     throw new Error("Merge 2 or more files");
   }
   mergeProgress(Progress.Load);
   const intputVecs = await Promise.all(
-    Array.from(files).map((f) => streamIntoVec(uploadFile(f)))
+    fileList.map((f) => streamIntoVec(uploadFile(f)))
   );
   const inputsPtr = rustExports.vec_vec_with_capacity(len);
   const inputsBuf = rustExports.vec_buffer(inputsPtr);
@@ -327,10 +328,10 @@ export async function mergeUploads(
     toRustString(new Date().toISOString().substr(0, 10))
   );
   mergeProgress(Progress.Js);
+  const merge = new Merge(filePtr);
+  mergeProgress(Progress.Done);
   mergeProgress = () => {
     return;
   };
-  const merge = new Merge(filePtr);
-  mergeProgress(Progress.Done);
   return merge;
 }

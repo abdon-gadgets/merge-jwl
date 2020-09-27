@@ -1,49 +1,58 @@
 <template>
   <div>
     <h1>{{ msg }}</h1>
-    <label>
-      JW Library backup files
-      <input
-        type="file"
-        required
-        multiple
-        accept=".jwlibrary"
-        @change="fileInputChange"
-      />
-    </label>
-    <p>{{ progress }}</p>
-    <div>
-      <!-- Errors -->
-      <h3 v-if="errors[0]">Errors</h3>
-      <ul>
-        <li v-for="error in errors" :key="error">
-          <ul class="message-error">
-            <li v-for="line in error" :key="line">{{ line }}</li>
-          </ul>
-        </li>
-      </ul>
-      <!-- BookmarkOverflow -->
-      <h3 v-if="bookmarks[0]">Discarded bookmarks (all 10 slots occupied)</h3>
-      <ul>
-        <li v-for="bookmark in bookmarks" :key="bookmark">
-          <p>{{ bookmark.title }}</p>
-          <small>{{ bookmark.snippet }}</small>
-          <i>{{ bookmarkText(bookmark) }}</i>
-        </li>
-      </ul>
-      <!-- NoteUpdate -->
-      <h3 v-if="notes[0]">Notes that are updated</h3>
-      <ul>
-        <li v-for="note in notes" :key="note">
-          <div v-for="text in [note.before, note.after]" :key="text">
-            <p>{{ text.title }}</p>
-            <small>{{ text.content }}</small>
-            <i>{{ new Date(text.date).toLocaleString() }}</i>
-          </div>
-        </li>
-      </ul>
-      <button v-if="merge && merge.file" @click="download">Download merged</button>
-    </div>
+    <p>
+      <label>
+        JW Library backup files
+        <input
+          type="file"
+          required
+          multiple
+          accept=".jwlibrary"
+          @change="fileInputChange"
+        />
+      </label>
+    </p>
+    <ul>
+      <li v-for="file in files" :key="file">
+        {{ file.name }}
+      </li>
+    </ul>
+    <p>
+      {{ progress }}
+      <button v-if="merge && merge.file" @click="download">
+        Download merged
+      </button>
+    </p>
+    <!-- Errors -->
+    <h3 v-if="errors[0]">Errors</h3>
+    <ul>
+      <li v-for="error in errors" :key="error">
+        <ul class="message-error">
+          <li v-for="line in error" :key="line">{{ line }}</li>
+        </ul>
+      </li>
+    </ul>
+    <!-- BookmarkOverflow -->
+    <h3 v-if="bookmarks[0]">Discarded bookmarks (all 10 slots occupied)</h3>
+    <ul>
+      <li v-for="bookmark in bookmarks" :key="bookmark">
+        <p>{{ bookmark.title }}</p>
+        <small>{{ bookmark.snippet }}</small>
+        <i>{{ bookmarkText(bookmark) }}</i>
+      </li>
+    </ul>
+    <!-- NoteUpdate -->
+    <h3 v-if="notes[0]">Notes that are updated</h3>
+    <ul>
+      <li v-for="note in notes" :key="note">
+        <div v-for="text in [note.before, note.after]" :key="text">
+          <p>{{ text.title }}</p>
+          <small>{{ text.content }}</small>
+          <i>{{ new Date(text.date).toLocaleString() }}</i>
+        </div>
+      </li>
+    </ul>
   </div>
 </template>
 
@@ -95,6 +104,7 @@ function mapMessage<T extends string | object>(
 interface Data {
   progress: string;
   merge: Merge | null;
+  files: Set<File>;
 }
 
 export default defineComponent({
@@ -106,6 +116,7 @@ export default defineComponent({
     return {
       progress: "",
       merge: null,
+      files: new Set(),
     } as Data;
   },
   computed: {
@@ -123,18 +134,27 @@ export default defineComponent({
   },
   methods: {
     fileInputChange: async function (e: Event) {
-      const files = (e.target as HTMLInputElement).files;
-      if (files && files.length > 1) {
+      const previousSize = this.files.size;
+      const element = e.target as HTMLInputElement;
+      const add = Array.from(element.files as FileList);
+      add.forEach((f) => this.files.add(f));
+      element.type = "text";
+      element.type = "file";
+      const newSize = this.files.size;
+      if (newSize > 1 && newSize > previousSize) {
         try {
           if (this.merge) {
             this.merge.drop();
+            this.merge = null;
           }
           this.merge = await mergeUploads(
-            files,
+            this.files,
             (p) => (this.progress = updateProgress(p))
           );
         } catch (e) {
           this.progress = e.toString();
+        } finally {
+          this.files.clear();
         }
       }
     },

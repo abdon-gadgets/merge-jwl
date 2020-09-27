@@ -2231,18 +2231,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@wasmer/wasi@npm:^0.11.2":
-  version: 0.11.2
-  resolution: "@wasmer/wasi@npm:0.11.2"
-  dependencies:
-    browser-process-hrtime: ^1.0.0
-    buffer-es6: ^4.9.3
-    path-browserify: ^1.0.0
-    randomfill: ^1.0.4
-  checksum: 81c0d9cc19fba331c7fc56a79bb67382c330f4eca47090d1900b766dd202787dfbdba4eb5f142c040e0cbd40b1328b9cf7685d8ee5e8feac5cd606df22420bfc
-  languageName: node
-  linkType: hard
-
 "@webassemblyjs/ast@npm:1.9.0":
   version: 1.9.0
   resolution: "@webassemblyjs/ast@npm:1.9.0"
@@ -3328,13 +3316,6 @@ __metadata:
   version: 0.2.13
   resolution: "buffer-crc32@npm:0.2.13"
   checksum: 0340e848d6fd87e49ef6f1067f31b2a8d2e71b433e9bb62ff3d9bc2499146f0be586b5b80b0d099c7110a226161b21cb6cd80162dd5a51d9ebdb03da58b99637
-  languageName: node
-  linkType: hard
-
-"buffer-es6@npm:^4.9.3":
-  version: 4.9.3
-  resolution: "buffer-es6@npm:4.9.3"
-  checksum: 7eb7b5fde3ca04a24d17d3ec9bdbd642e4f3320c881eaafe938cbb135e247f08f3f43abe7ea49a411f2581bd663cab026fbdd677550780a3b25ea0177ac4ef02
   languageName: node
   linkType: hard
 
@@ -8517,7 +8498,6 @@ fsevents@~2.1.2:
     "@vue/compiler-sfc": ^3.0.0-0
     "@vue/eslint-config-typescript": ^5.0.2
     "@vue/test-utils": ^2.0.0-0
-    "@wasmer/wasi": ^0.11.2
     chai: ^4.1.2
     core-js: ^3.6.5
     eslint: ^6.7.2
@@ -9736,13 +9716,6 @@ fsevents@~2.1.2:
   languageName: node
   linkType: hard
 
-"path-browserify@npm:^1.0.0":
-  version: 1.0.1
-  resolution: "path-browserify@npm:1.0.1"
-  checksum: 45bb7389177dfe5cba5d1ee9589e578c8272ac330c00d388343845199c1d30227ca8d59bb3a15618e478673fcfa2fb7a5ad2bfcc1083d442a61a3a71aecd7dd6
-  languageName: node
-  linkType: hard
-
 "path-dirname@npm:^1.0.0":
   version: 1.0.2
   resolution: "path-dirname@npm:1.0.2"
@@ -10632,7 +10605,7 @@ fsevents@~2.1.2:
   languageName: node
   linkType: hard
 
-"randomfill@npm:^1.0.3, randomfill@npm:^1.0.4":
+"randomfill@npm:^1.0.3":
   version: 1.0.4
   resolution: "randomfill@npm:1.0.4"
   dependencies:

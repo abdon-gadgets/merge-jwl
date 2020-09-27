@@ -1,6 +1,3 @@
-import { WASI } from "@wasmer/wasi";
-import wasiBindings from "@wasmer/wasi/lib/bindings/browser";
-
 let rustExports: RustrustExports;
 
 let mergeProgress: (p: Progress) => void = () => {
@@ -132,6 +129,7 @@ interface RustrustExports {
   "vec_u8_drop"(vec: number): void;
   "jwl_merge"(inputs: number, dateNow: number): number;
   "merge_result_drop"(mergeResult: number): void;
+  "_start": () => void;
 }
 
 export const enum Progress {
@@ -152,15 +150,22 @@ async function _startWasi() {
     ? WebAssembly.compileStreaming(response)
     : WebAssembly.compile(await (await response).arrayBuffer()));
 
-  const wasi = new WASI({
-    bindings: { ...wasiBindings },
-  });
-  const bindings = new Proxy(wasi.getImports(module).wasi_snapshot_preview1, {
+  const bindings = new Proxy({
+    "random_get": (bufPtr: number, bufLen: number) => {
+      const view = new Uint8Array(rustExports.memory.buffer, bufPtr, bufLen);
+      crypto.getRandomValues(view);
+      console.debug("random", view);
+      return 0;
+    },
+    "fd_prestat_get": () => 8, // ERRNO_BADF Bad file descriptor
+  }, {
     get: function(target: any, prop) {
-      return (...args: any[]) => {
-        const result = target[prop](...args);
-        console.log("wasi proxy", prop, args, result);
-        return result;
+      return (...rest: any[]) => {
+        const original = target[prop];
+        if (original) {
+          return original(...rest);
+        }
+        throw new Error("Unimplemented WASI " + prop.toString());
       }
     }
   });
@@ -178,7 +183,7 @@ async function _startWasi() {
   rustExports = (instance.exports as unknown) as RustrustExports;
 
   // Start the WebAssembly WASI instance!
-  wasi.start(instance);
+  rustExports._start();
   if (rustExports.return_one() !== 1) {
     throw new Error("WebAssembly failed to load");
   }

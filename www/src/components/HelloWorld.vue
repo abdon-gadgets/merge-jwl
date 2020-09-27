@@ -123,10 +123,12 @@ export default defineComponent({
   },
   methods: {
     fileInputChange: async function (e: Event) {
-      // TODO: Wait for WASI
       const files = (e.target as HTMLInputElement).files;
       if (files && files.length > 1) {
         try {
+          if (this.merge) {
+            this.merge.drop();
+          }
           this.merge = await mergeUploads(
             files,
             (p) => (this.progress = updateProgress(p))

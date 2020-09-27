@@ -250,7 +250,7 @@ export class Merge {
   messages: MessageJson[];
   objectURL?: string;
 
-  constructor(private filePtr: number) {
+  constructor(filePtr: number) {
     if (filePtr == 0) {
       throw new Error("Returned null");
     }
@@ -266,6 +266,7 @@ export class Merge {
       ]);
       const fileName = mergeResult.resultManifest.name + ".jwlibrary";
       this.file = new File([blob], fileName);
+      rustExports.merge_result_drop(filePtr);
     }
     this.messages = mergeResult.messages;
   }
@@ -273,8 +274,8 @@ export class Merge {
   drop() {
     if (this.objectURL) {
       URL.revokeObjectURL(this.objectURL);
+      this.objectURL = undefined;
     }
-    rustExports.merge_result_drop(this.filePtr);
   }
 
   download() {

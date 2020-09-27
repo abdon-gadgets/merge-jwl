@@ -147,17 +147,26 @@ export const enum Progress {
 
 async function _startWasi() {
   // Instantiate a new WASI Instance
-  const wasi = new WASI({
-    env: { RUST_BACKTRACE: "1" },
-    bindings: { ...wasiBindings },
-  });
-
   const response = fetch("/merge-jwl.wasm");
   const module = await (typeof WebAssembly.compileStreaming === "function"
     ? WebAssembly.compileStreaming(response)
     : WebAssembly.compile(await (await response).arrayBuffer()));
+
+  const wasi = new WASI({
+    bindings: { ...wasiBindings },
+  });
+  const bindings = new Proxy(wasi.getImports(module).wasi_snapshot_preview1, {
+    get: function(target: any, prop) {
+      return (...args: any[]) => {
+        const result = target[prop](...args);
+        console.log("wasi proxy", prop, args, result);
+        return result;
+      }
+    }
+  });
+
   const instance = await WebAssembly.instantiate(module, {
-    ...wasi.getImports(module),
+    "wasi_snapshot_preview1": bindings,
     env: {
       "js_console_panic": (ptr: number, len: number) =>
         // eslint-disable-next-line no-console

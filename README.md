@@ -8,9 +8,15 @@ With the official app, you can transfer user data between devices,
 but you can't combine them into a single set.
 
 This project is a port of <https://github.com/AntonyCorbett/JWLMerge>.
-While JWLMerge only supports Windows (C#, .NET Framework), this utility is programmed
+While JWLMerge is a desktop application (.NET Framework), this utility is programmed
 using the Rust programming language to support more platforms:
-Browser (WebAssembly), Linux, MacOS and Windows.
+Browser (WASM), Linux, MacOS and Windows.
+
+You can use the web app <https://merge-jwl.netlify.app/> with Safari on iOS, Chrome on Android
+and other modern browsers.
+The `.jwlibrary` files that you upload stay on your device, they are not send over the internet.
+This is possible because the app merges your data client side using WebAssembly.
+Privacy Policy: The web server doesn't collect or process any user data.
 
 ## Important Notes
 

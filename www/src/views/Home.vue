@@ -1,6 +1,11 @@
 <template>
   <div class="home">
-    <MergeForm msg="JW Library Notes Sync"/>
+    <h1>Merge JWL</h1>
+    <p>
+      Upload two or more <code>.jwlibrary</code> backup files.
+    </p>
+    <!-- TODO: Instructions for different operating systems -->
+    <MergeForm/>
   </div>
 </template>
 

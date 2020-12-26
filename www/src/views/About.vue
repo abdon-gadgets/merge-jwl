@@ -1,6 +1,6 @@
 <template>
   <div class="about">
-    <h1>About merge-jwl</h1>
+    <h1>About</h1>
     <p>
       At time of writing, the JW Library app has backup and restore commands,
       but no merge command.
@@ -12,7 +12,9 @@
     </p>
     <h2>Contact</h2>
     <p>
-      Mail <a href="mailto:abdon-gadgets@outlook.com">abdon-gadgets@outlook.com</a>
+      E-mail to <a href="mailto:abdon-gadgets@outlook.com">abdon-gadgets@outlook.com</a>
+      for support, issues or feature requests.
+      Alternatively, use the <a href="https://github.com/abdon-gadgets/merge-jwl/issues">bug tracker</a>.
     </p>
     <h2>Privacy</h2>
     <p>

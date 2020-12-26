@@ -27,7 +27,8 @@
     <h2>Release Notes</h2>
     <ul>
       <li>
-        v0.2 wrote instructions and
+        <a href="https://github.com/abdon-gadgets/merge-jwl/releases/tag/v0.2">v0.2</a>
+        wrote instructions and
         <a href="https://merge-jwl.netlify.app/about">about page</a>
       </li>
     </ul>

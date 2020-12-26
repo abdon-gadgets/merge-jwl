@@ -24,14 +24,12 @@
       <li>Restore the backup in JW Library</li>
       <!-- <li>Click ‘Restore a backup’</li> -->
     </ol>
-    <h2>Release Notes</h2>
-    <ul>
-      <li>
+    <h2>Changelog</h2>
+    <p>
         <a href="https://github.com/abdon-gadgets/merge-jwl/releases/tag/v0.2">v0.2</a>
-        wrote instructions and
+        (2020-12-26): Wrote instructions and
         <a href="https://merge-jwl.netlify.app/about">about page</a>
-      </li>
-    </ul>
+    </p>
   </div>
 </template>
 
